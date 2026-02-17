@@ -1,0 +1,51 @@
+Q3 Model Performance Report
+
+Overview
+
+The ML team deployed three major models in Q3: a customer churn predictor, a document classifier, and a recommendation engine. Each underwent rigorous evaluation against established benchmarks before production deployment.
+
+Churn Prediction Model
+
+The customer churn prediction model was trained on 18 months of historical data comprising 2.3 million customer records. The model uses a gradient-boosted decision tree architecture (XGBoost) with 47 engineered features including transaction frequency, service usage patterns, and customer support interaction history.
+
+Performance metrics for Q3:
+- AUC-ROC: 0.89 (up from 0.84 in Q2)
+- Precision at 80% recall: 0.72
+- F1 Score: 0.78
+- False positive rate: 12.3%
+
+The model correctly identified 83% of customers who churned within the following quarter. Notable improvements came from incorporating social network features and seasonal usage patterns. The false positive rate remains a concern as it triggers unnecessary retention campaigns.
+
+Document Classification Model
+
+The document classifier uses a fine-tuned BERT-base model to categorize incoming support tickets into 15 categories. Training data consisted of 45,000 labeled tickets from the past two years.
+
+Q3 performance:
+- Overall accuracy: 91.2%
+- Macro F1: 0.87
+- Weighted F1: 0.91
+- Top-3 accuracy: 97.4%
+
+Categories with lowest performance include "billing disputes" (F1: 0.73) and "technical integration" (F1: 0.71), likely due to significant overlap in vocabulary between these categories. Data augmentation strategies are planned for Q4.
+
+Recommendation Engine
+
+The recommendation system combines collaborative filtering with content-based features using a hybrid neural architecture. It serves approximately 1.2 million recommendations per day across the platform.
+
+Key metrics:
+- Click-through rate: 4.7% (industry average: 3.2%)
+- Mean reciprocal rank: 0.34
+- Coverage: 78% of catalog items recommended at least once
+- Diversity score: 0.62
+
+A/B testing revealed that the new hybrid model outperforms the previous collaborative-only approach by 23% in conversion rate. Cold-start performance improved significantly with the addition of content features for new items.
+
+Infrastructure Costs
+
+Model serving infrastructure costs for Q3:
+- GPU compute: $12,400/month
+- Storage: $2,100/month
+- Data pipeline: $3,800/month
+- Total: $18,300/month
+
+Cost per prediction decreased by 15% compared to Q2 due to model optimization and batch inference improvements.

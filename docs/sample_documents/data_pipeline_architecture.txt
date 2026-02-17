@@ -1,0 +1,52 @@
+Data Pipeline Architecture
+
+System Overview
+
+The data pipeline processes raw data from multiple sources and transforms it into analytics-ready datasets. The architecture follows an ELT (Extract, Load, Transform) pattern using a modern data stack built on cloud infrastructure.
+
+Data Sources
+
+The system ingests data from five primary sources:
+1. Transactional database (PostgreSQL) - 50GB daily
+2. Event streaming (Apache Kafka) - 200 million events/day
+3. Third-party APIs (Salesforce, Stripe) - hourly syncs
+4. Application logs (Elasticsearch) - 100GB daily
+5. External market data feeds - real-time streaming
+
+Ingestion Layer
+
+Apache Kafka serves as the central message broker for real-time event ingestion. Debezium connectors capture change data from PostgreSQL using CDC (Change Data Capture) to ensure minimal latency between source updates and data availability in the warehouse.
+
+Batch ingestion jobs run on Apache Airflow with DAGs scheduled at 15-minute intervals for critical data and hourly for secondary sources. Airflow manages dependency resolution and retry logic with exponential backoff.
+
+Storage Layer
+
+Raw data lands in an S3-compatible object store organized by source and date partition. The data warehouse uses Apache Iceberg table format on top of S3 for ACID transactions, schema evolution, and time travel capabilities.
+
+Data is organized into three zones:
+- Bronze (raw): Unprocessed data as received from sources
+- Silver (cleaned): Validated, deduplicated, and standardized data
+- Gold (curated): Business-ready aggregated datasets and feature stores
+
+Transformation Layer
+
+dbt (data build tool) handles all SQL-based transformations with version-controlled models, automated testing, and documentation. Key transformation patterns include:
+- Slowly changing dimensions (Type 2)
+- Incremental materialization for large fact tables
+- Snapshot testing for data quality validation
+
+Data quality checks run at each layer transition, validating schema conformance, null rates, value distributions, and cross-reference integrity. Great Expectations framework provides automated data validation.
+
+Orchestration
+
+Apache Airflow orchestrates the entire pipeline with approximately 120 active DAGs. Critical path monitoring ensures SLA compliance with a target of 99.5% on-time delivery for gold-layer datasets.
+
+Monitoring includes:
+- Pipeline latency dashboards (Grafana)
+- Data freshness alerts (PagerDuty integration)
+- Cost tracking per pipeline (custom metrics)
+- Data lineage visualization (OpenLineage)
+
+Security
+
+All data in transit is encrypted using TLS 1.3. Data at rest uses AES-256 encryption. Access control follows a role-based model with separate permissions for each data zone. PII data is identified and masked at the silver layer using automated classification.

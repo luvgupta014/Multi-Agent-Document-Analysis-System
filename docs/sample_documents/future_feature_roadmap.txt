@@ -1,0 +1,72 @@
+Future Feature Roadmap
+
+Q4 Priorities
+
+The product and engineering teams have aligned on four major initiatives for Q4, focusing on improving system intelligence, user experience, and operational efficiency.
+
+1. Advanced RAG Pipeline
+
+Current retrieval system uses basic vector similarity search. The Q4 upgrade introduces:
+- Hybrid search combining dense embeddings with BM25 sparse retrieval
+- Re-ranking stage using a cross-encoder model for improved precision
+- Query decomposition for multi-hop questions
+- Contextual compression to reduce irrelevant passage content
+
+Expected improvements: 30% increase in retrieval accuracy and 25% reduction in hallucination rates based on internal benchmarks.
+
+2. Multi-Agent Orchestration Framework
+
+Building a production-ready multi-agent system with:
+- Agent registry and discovery service (MCP-based)
+- Structured inter-agent communication protocol (A2A)
+- Conversation state management across agent handoffs
+- Automatic fallback and retry mechanisms
+- Agent performance monitoring and load balancing
+
+The framework will support dynamic agent provisioning where new specialist agents can be deployed and registered without system restart.
+
+3. Real-Time Analytics Dashboard
+
+A new analytics dashboard providing:
+- Live query throughput and latency percentiles (p50, p95, p99)
+- Token usage tracking per model and per user
+- Cost attribution by department and use case
+- Retrieval quality metrics (relevance scores, source diversity)
+- Automated anomaly detection for query patterns
+
+The dashboard will use WebSocket connections for real-time updates and support configurable alerting thresholds.
+
+4. Enhanced Security and Compliance
+
+Security improvements planned:
+- Row-level security for document access control
+- Audit logging for all data access and model invocations
+- PII detection and automatic redaction in responses
+- SOC 2 Type II compliance preparation
+- API rate limiting with per-tenant quotas
+
+Technical Debt Items
+
+Several technical debt items are scheduled for Q4:
+- Migration from deprecated ChromaDB API to v2 client interface
+- Consolidation of embedding models (currently using 3 different models)
+- Database connection pooling optimization
+- Test coverage improvement from 65% to 85%
+- API documentation standardization using OpenAPI 3.1
+
+Resource Allocation
+
+Q4 engineering allocation:
+- RAG Pipeline: 3 engineers, 6 weeks
+- Multi-Agent Framework: 2 engineers, 8 weeks
+- Analytics Dashboard: 2 engineers, 4 weeks
+- Security & Compliance: 1 engineer + external auditor, ongoing
+- Technical Debt: Rotating allocation, 20% of sprint capacity
+
+Timeline
+
+- Week 1-2: Design reviews and architecture finalization
+- Week 3-8: Core implementation sprints
+- Week 9-10: Integration testing and performance benchmarking
+- Week 11-12: Staged rollout with canary deployments
+- Week 13: Retrospective and Q1 planning
