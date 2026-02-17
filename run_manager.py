@@ -68,11 +68,12 @@ def main():
     if mcp_host == "0.0.0.0":
         mcp_host = "localhost"
     mcp_port = os.getenv("MCP_SERVER_PORT", "8000")
-    model_name = os.getenv("GEMINI_MODEL", config.get("gemini", {}).get("model_name", "gemini-2.0-flash"))
+    mcp_url = os.getenv("MCP_SERVER_URL", f"http://{mcp_host}:{mcp_port}")
+    model_name = os.getenv("GEMINI_MODEL", config.get("gemini", {}).get("model_name", "gemini-2.5-flash"))
 
     manager = ManagerAgent(
         agent_id="manager",
-        mcp_url=f"http://{mcp_host}:{mcp_port}",
+        mcp_url=mcp_url,
         api_key=api_key,
         model_name=model_name
     )

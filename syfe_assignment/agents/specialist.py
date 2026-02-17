@@ -113,11 +113,11 @@ class SpecialistAgent:
                 "tools": [t.name for t in self.get_tools()]
             }
 
-    def get_registration(self) -> AgentRegistration:
+    def get_registration(self, endpoint_host: str = "localhost") -> AgentRegistration:
         return AgentRegistration(
             agent_id=self.agent_id,
             name=self.name,
             description=self.description,
             tools=self.get_tools(),
-            endpoint=f"http://localhost:{self.port}"
+            endpoint=f"http://{endpoint_host}:{self.port}"
         )

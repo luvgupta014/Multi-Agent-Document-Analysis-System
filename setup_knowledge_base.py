@@ -12,12 +12,11 @@ def setup_knowledge_base():
     persist_dir = os.getenv("KB_PERSIST_DIR", "./chroma_db")
     chunk_size = int(os.getenv("KB_CHUNK_SIZE", "500"))
     collection = os.getenv("SPECIALIST_COLLECTION", "climate_docs")
+    force_reload = os.getenv("FORCE_RELOAD", "false").lower() == "true"
 
     os.makedirs(doc_dir, exist_ok=True)
     os.makedirs(persist_dir, exist_ok=True)
     os.makedirs("logs", exist_ok=True)
-
-    doc_dir = os.getenv("KB_DOC_DIR", "docs/sample_documents")
 
     if not os.listdir(doc_dir):
         logger.error(f"No documents found in {doc_dir}")
@@ -41,9 +40,16 @@ def setup_knowledge_base():
     )
 
     if vector_store.collection.count() > 0:
-        response = input("Collection already has data. Clear and reload? (y/n): ")
-        if response.lower() == 'y':
+        if force_reload:
+            logger.info("Force reload enabled, clearing existing data")
             vector_store.clear()
+        else:
+            response = input("Collection already has data. Clear and reload? (y/n): ")
+            if response.lower() == 'y':
+                vector_store.clear()
+            else:
+                logger.info("Keeping existing data")
+                return
 
     vector_store.add_documents(documents)
 

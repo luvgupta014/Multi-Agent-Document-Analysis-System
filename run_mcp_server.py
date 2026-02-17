@@ -2,10 +2,12 @@ import uvicorn
 from dotenv import load_dotenv
 import os
 
+from syfe_assignment.utils.logging_config import setup_logging
+
 load_dotenv()
 
 if __name__ == "__main__":
-    os.makedirs("logs", exist_ok=True)
+    setup_logging("mcp_server")
 
     host = os.getenv("MCP_SERVER_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_SERVER_PORT", "8000"))

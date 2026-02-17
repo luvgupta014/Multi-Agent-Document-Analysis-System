@@ -5,6 +5,7 @@ import google.generativeai as genai
 from loguru import logger
 
 from syfe_assignment.mcp_server.models import Message
+from syfe_assignment.utils.metrics import MetricsCollector, QueryMetric
 
 SPECIALIST_SYSTEM_PROMPT = """You are a meticulous technical analyst. Your job is to synthesize a clear, concise answer based only on the provided context and the user's question. You must:
 1. Only use information from the provided context passages.
@@ -19,7 +20,7 @@ class ManagerAgent:
         agent_id: str = "manager",
         mcp_url: str = "http://localhost:8000",
         api_key: Optional[str] = None,
-        model_name: str = "gemini-2.0-flash"
+        model_name: str = "gemini-2.5-flash"
     ):
         self.agent_id = agent_id
         self.mcp_url = mcp_url
@@ -30,6 +31,7 @@ class ManagerAgent:
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel(model_name)
         self.model_name = model_name  # TODO: support model fallback if quota exceeded
+        self.metrics = MetricsCollector()
         logger.info(f"Manager agent '{agent_id}' initialized with {model_name}")
 
     def _should_use_retrieval(self, question: str, available_tools: List[str]) -> bool:
@@ -221,6 +223,7 @@ Provide a clear, concise answer with source citations."""
                 }
 
             search_results = await self.query_specialist(specialist, question)
+            retrieval_ms = round((time.time() - total_start) * 1000, 1)
 
             if "error" in search_results:
                 return {
@@ -230,10 +233,22 @@ Provide a clear, concise answer with source citations."""
                     "success": False
                 }
 
+            synth_start = time.time()
             answer = self._synthesize_answer(question, search_results)
+            synth_ms = round((time.time() - synth_start) * 1000, 1)
 
             total_ms = round((time.time() - total_start) * 1000, 1)
             logger.info(f"Total question processing time: {total_ms}ms")
+
+            self.metrics.record_query(QueryMetric(
+                question=question,
+                specialist_used=specialist['name'],
+                retrieval_time=retrieval_ms / 1000,
+                synthesis_time=synth_ms / 1000,
+                total_time=total_ms / 1000,
+                results_count=len(search_results.get('results', [])),
+                success=True
+            ))
 
             return {
                 "question": question,

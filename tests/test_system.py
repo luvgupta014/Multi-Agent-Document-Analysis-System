@@ -1,8 +1,4 @@
 import pytest
-import pytest_asyncio
-import httpx
-import asyncio
-import json
 from unittest.mock import patch, MagicMock
 
 from syfe_assignment.mcp_server.models import Tool, AgentRegistration, Message, MessageResponse

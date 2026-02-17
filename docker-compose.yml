@@ -8,13 +8,26 @@ services:
       - "8000:8000"
     volumes:
       - ./logs:/app/logs
-      - ./chroma_db:/app/chroma_db
+      - chroma_data:/app/chroma_db
     command: python run_mcp_server.py
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
+
+  init-kb:
+    build: .
+    container_name: init-knowledge-base
+    volumes:
+      - chroma_data:/app/chroma_db
+      - ./docs:/app/docs
+    environment:
+      - FORCE_RELOAD=true
+    command: python setup_knowledge_base.py
+    depends_on:
+      mcp-server:
+        condition: service_healthy
 
   specialist:
     build: .
@@ -23,14 +36,15 @@ services:
       - "8001:8001"
     volumes:
       - ./logs:/app/logs
-      - ./chroma_db:/app/chroma_db
+      - chroma_data:/app/chroma_db
       - ./docs:/app/docs
     environment:
       - MCP_SERVER_URL=http://mcp-server:8000
+      - SPECIALIST_HOST=specialist
     command: python run_specialist.py
     depends_on:
-      mcp-server:
-        condition: service_healthy
+      init-kb:
+        condition: service_completed_successfully
 
   manager:
     build: .
@@ -45,3 +59,6 @@ services:
       - specialist
     stdin_open: true
     tty: true
+
+volumes:
+  chroma_data:

@@ -14,7 +14,7 @@ registry = AgentRegistry()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("MCP Server starting on http://localhost:8000")
+    logger.info("MCP Server starting")
     yield
     logger.info("MCP Server shutting down")
 
@@ -205,12 +205,3 @@ async def health_check():
         "registered_agents": stats["total_agents"],
         "agents": stats["agents"]
     }
-
-
-logger.add(
-    "logs/mcp_server.log",
-    rotation="10 MB",
-    retention="7 days",
-    level="INFO",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
-)

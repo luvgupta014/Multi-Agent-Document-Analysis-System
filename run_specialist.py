@@ -8,6 +8,7 @@ import os
 import sys
 
 from syfe_assignment.agents.specialist import SpecialistAgent
+from syfe_assignment.utils.logging_config import setup_logging
 
 load_dotenv()
 
@@ -26,9 +27,13 @@ if MCP_HOST == "0.0.0.0":
 MCP_PORT = os.getenv("MCP_SERVER_PORT", "8000")
 MCP_URL = os.getenv("MCP_SERVER_URL", f"http://{MCP_HOST}:{MCP_PORT}")
 
+# hostname the MCP server should use to call back to this specialist
+# in Docker this should be the container/service name (e.g. "specialist")
+SPECIALIST_HOST = os.getenv("SPECIALIST_HOST", "localhost")
+
 
 async def register_with_mcp(agent: SpecialistAgent, max_retries: int = 5):
-    registration = agent.get_registration()
+    registration = agent.get_registration(endpoint_host=SPECIALIST_HOST)
 
     for attempt in range(max_retries):
         try:
@@ -57,14 +62,8 @@ async def register_with_mcp(agent: SpecialistAgent, max_retries: int = 5):
 
 
 def main():
-    os.makedirs("logs", exist_ok=True)
+    setup_logging(f"specialist_{SPECIALIST_CONFIG['agent_id']}")
     os.makedirs("chroma_db", exist_ok=True)
-
-    logger.add(
-        f"logs/specialist_{SPECIALIST_CONFIG['agent_id']}.log",
-        rotation="10 MB",
-        level="INFO"
-    )
 
     try:
         agent = SpecialistAgent(**SPECIALIST_CONFIG)
