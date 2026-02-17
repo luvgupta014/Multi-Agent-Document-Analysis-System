@@ -40,10 +40,11 @@ Manager gets results back, synthesizes answer with Gemini
 
 ### Prerequisites
 - Python 3.12+
-- A Gemini API key — get one free at https://aistudio.google.com/app/apikey
+- A Gemini API key — get one free at https://aistudio.google.com/app/apikey (takes ~30 seconds)
 
 ### Setup
 
+**1. Install dependencies:**
 ```bash
 python -m venv venv
 venv\Scripts\activate        # Windows
@@ -52,10 +53,20 @@ source venv/bin/activate     # Mac/Linux
 pip install -r requirements.txt
 ```
 
-Put your API key in `.env`:
+**2. Configure environment:**
+```bash
+cp .env.example .env   # Mac/Linux
+copy .env.example .env  # Windows
 ```
-GEMINI_API_KEY=your_key_here
+
+Open `.env` and **only change** the first line:
 ```
+GEMINI_API_KEY=your_actual_api_key_here
+```
+
+**All other variables have working defaults** — ports (8000, 8001), paths, model name (`gemini-2.5-flash`), etc. No need to touch them unless you want to customize.
+
+**Note on LLM flexibility:** The system currently uses Google Gemini because it has a generous free tier and simple API. You can switch between Gemini models (`gemini-2.5-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`) by changing `GEMINI_MODEL` in `.env`. **To use OpenAI, Anthropic, or other providers**, you'd need to modify [manager.py](syfe_assignment/agents/manager.py#L29) to replace the `google.generativeai` client — the architecture supports this, but I kept it simple for the MVP to focus on the MCP/multi-agent design.
 
 ### Index the knowledge base
 
@@ -194,7 +205,11 @@ pytest tests/test_system.py -v
 
 ## Troubleshooting
 
+- **"GEMINI_API_KEY not found"** — Make sure you created `.env` from `.env.example` and added your actual API key
 - **"No specialist agents available"** — Make sure `run_specialist.py` is running and you see "Registered with MCP server" in its output
 - **"Knowledge base is empty"** — Run `setup_knowledge_base.py` first
-- **429 rate limit** — Gemini free tier has limits. Wait 30s or try a different model in `.env`
-- **Port conflict** — Kill existing Python processes or change ports in `.env`
+- **429 rate limit** — Gemini free tier has limits. Wait 30s or try switching to `gemini-1.5-flash` in `.env`
+- **Port conflict** — Kill existing Python processes (`taskkill /F /IM python.exe` on Windows) or change `MCP_SERVER_PORT`/`SPECIALIST_PORT` in `.env`
+- **ModuleNotFoundError** — Make sure you activated the virtual environment (`venv\Scripts\activate` on Windows)
+
+**Quick connection test:** After starting all 3 terminals, visit http://localhost:8000/health in your browser — you should see `{"status":"healthy"}`
