@@ -1,0 +1,47 @@
+version: "3.8"
+
+services:
+  mcp-server:
+    build: .
+    container_name: mcp-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./chroma_db:/app/chroma_db
+    command: python run_mcp_server.py
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  specialist:
+    build: .
+    container_name: specialist-climate
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./logs:/app/logs
+      - ./chroma_db:/app/chroma_db
+      - ./docs:/app/docs
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8000
+    command: python run_specialist.py
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+
+  manager:
+    build: .
+    container_name: manager-agent
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MCP_SERVER_URL=http://mcp-server:8000
+    command: python run_manager.py
+    depends_on:
+      - specialist
+    stdin_open: true
+    tty: true
