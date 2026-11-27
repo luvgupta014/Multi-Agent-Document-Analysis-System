@@ -56,8 +56,9 @@ _manager: Optional[ManagerAgent] = None
 async def lifespan(app: FastAPI):
     global _manager
     setup_logging(
-        level=os.getenv("LOG_LEVEL", "INFO"),
+        service_name="manager_api",
         log_dir=os.getenv("LOG_DIR", "logs"),
+        level=os.getenv("LOG_LEVEL", "INFO"),
     )
 
     api_key = os.getenv("GEMINI_API_KEY")

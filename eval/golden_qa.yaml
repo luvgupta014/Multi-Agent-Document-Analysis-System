@@ -1,0 +1,137 @@
+# Golden QA set for retrieval evaluation
+#
+# Format per entry:
+#   question:        the user's natural-language question
+#   answer:          concise ground-truth answer (used for Ragas)
+#   relevant_chunks: list of chunk IDs that MUST appear in the top-k results
+#                    to count as a hit (format: "<stem>_chunk_<n>")
+#
+# 30 questions across all 5 source documents.
+# Coverage: climate (6), renewable (6), ml_perf (7), pipeline (6), roadmap (5)
+
+questions:
+
+  # --- climate_info.txt ---
+  - question: "What has been the main driver of climate change since the 1800s?"
+    answer: "Human activities, primarily burning fossil fuels like coal, oil, and gas."
+    relevant_chunks: ["climate_info_chunk_0"]
+
+  - question: "By how much has CO2 concentration increased since pre-industrial times?"
+    answer: "Over 40%."
+    relevant_chunks: ["climate_info_chunk_0"]
+
+  - question: "What temperature limit does scientific consensus say we must stay under?"
+    answer: "1.5°C above pre-industrial levels."
+    relevant_chunks: ["climate_info_chunk_1"]
+
+  - question: "Name three major impacts of climate change."
+    answer: "Rising global temperatures, melting polar ice caps, sea level rise."
+    relevant_chunks: ["climate_info_chunk_1"]
+
+  - question: "What individual actions help reduce climate change?"
+    answer: "Reducing energy consumption, using public transport or EVs, eating less meat, recycling."
+    relevant_chunks: ["climate_info_chunk_2"]
+
+  - question: "What international agreement coordinates global climate action?"
+    answer: "The Paris Agreement."
+    relevant_chunks: ["climate_info_chunk_2"]
+
+  # --- renewable_energy.txt ---
+  - question: "How do solar panels generate electricity?"
+    answer: "They use photovoltaic cells to convert sunlight directly into electricity."
+    relevant_chunks: ["renewable_energy_chunk_0"]
+
+  - question: "What is the main challenge with solar and wind energy?"
+    answer: "Intermittency — they require energy storage solutions."
+    relevant_chunks: ["renewable_energy_chunk_2"]
+
+  - question: "What technology does hydroelectric power use?"
+    answer: "Flowing water through dams to generate electricity."
+    relevant_chunks: ["renewable_energy_chunk_1"]
+
+  - question: "Where is geothermal energy most viable?"
+    answer: "In volcanic regions."
+    relevant_chunks: ["renewable_energy_chunk_1"]
+
+  - question: "What are three benefits of renewable energy?"
+    answer: "Reduces greenhouse gas emissions, decreases air pollution, creates jobs."
+    relevant_chunks: ["renewable_energy_chunk_2"]
+
+  - question: "What materials are used in biomass energy production?"
+    answer: "Wood, agricultural waste, and dedicated energy crops."
+    relevant_chunks: ["renewable_energy_chunk_1"]
+
+  # --- model_performance_report.txt ---
+  - question: "What is the AUC-ROC of the churn prediction model in Q3?"
+    answer: "0.89"
+    relevant_chunks: ["model_performance_report_chunk_1"]
+
+  - question: "What architecture does the churn model use?"
+    answer: "Gradient-boosted decision tree (XGBoost) with 47 engineered features."
+    relevant_chunks: ["model_performance_report_chunk_0"]
+
+  - question: "How many customer records was the churn model trained on?"
+    answer: "2.3 million customer records from 18 months of historical data."
+    relevant_chunks: ["model_performance_report_chunk_0"]
+
+  - question: "What is the document classifier's overall accuracy?"
+    answer: "91.2%"
+    relevant_chunks: ["model_performance_report_chunk_2"]
+
+  - question: "Which ticket categories have the lowest F1 score in document classification?"
+    answer: "Billing disputes (F1: 0.73) and technical integration (F1: 0.71)."
+    relevant_chunks: ["model_performance_report_chunk_2"]
+
+  - question: "What is the recommendation engine's click-through rate?"
+    answer: "4.7% (versus industry average of 3.2%)."
+    relevant_chunks: ["model_performance_report_chunk_3"]
+
+  - question: "What is the total monthly cost for model serving infrastructure in Q3?"
+    answer: "$18,300/month."
+    relevant_chunks: ["model_performance_report_chunk_4"]
+
+  # --- data_pipeline_architecture.txt ---
+  - question: "What ELT pattern does the data pipeline follow?"
+    answer: "Extract, Load, Transform using a modern data stack on cloud infrastructure."
+    relevant_chunks: ["data_pipeline_architecture_chunk_0"]
+
+  - question: "How does the pipeline handle real-time event ingestion?"
+    answer: "Apache Kafka serves as the central message broker; Debezium connectors capture CDC from PostgreSQL."
+    relevant_chunks: ["data_pipeline_architecture_chunk_1"]
+
+  - question: "What are the three data storage zones?"
+    answer: "Bronze (raw), Silver (cleaned), Gold (curated)."
+    relevant_chunks: ["data_pipeline_architecture_chunk_2"]
+
+  - question: "What tool manages SQL transformations in the pipeline?"
+    answer: "dbt (data build tool)."
+    relevant_chunks: ["data_pipeline_architecture_chunk_3"]
+
+  - question: "What orchestration tool runs the pipeline DAGs?"
+    answer: "Apache Airflow, with approximately 120 active DAGs."
+    relevant_chunks: ["data_pipeline_architecture_chunk_4"]
+
+  - question: "How is data encrypted in transit in the pipeline?"
+    answer: "TLS 1.3 for data in transit; AES-256 for data at rest."
+    relevant_chunks: ["data_pipeline_architecture_chunk_5"]
+
+  # --- future_feature_roadmap.txt ---
+  - question: "What retrieval improvements are planned for the Q4 RAG pipeline?"
+    answer: "Hybrid search (BM25 + dense embeddings), cross-encoder re-ranking, query decomposition, contextual compression."
+    relevant_chunks: ["future_feature_roadmap_chunk_1"]
+
+  - question: "What percentage improvement in retrieval accuracy does Q4 expect?"
+    answer: "30% increase in retrieval accuracy and 25% reduction in hallucination rates."
+    relevant_chunks: ["future_feature_roadmap_chunk_1"]
+
+  - question: "What security improvements are planned for Q4?"
+    answer: "Row-level security, audit logging, PII detection/redaction, SOC 2 Type II prep, API rate limiting."
+    relevant_chunks: ["future_feature_roadmap_chunk_4"]
+
+  - question: "How many engineers are allocated to the Q4 RAG pipeline work?"
+    answer: "3 engineers for 6 weeks."
+    relevant_chunks: ["future_feature_roadmap_chunk_6"]
+
+  - question: "What is the target test coverage improvement in Q4 technical debt?"
+    answer: "From 65% to 85%."
+    relevant_chunks: ["future_feature_roadmap_chunk_5"]
