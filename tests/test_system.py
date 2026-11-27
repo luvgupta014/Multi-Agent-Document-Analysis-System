@@ -308,42 +308,42 @@ class TestMCPServer:
 class TestManagerAgent:
     """Unit tests for ManagerAgent logic (no network calls)."""
 
-    def _make_manager(self, mock_genai):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
+    def _make_manager(self):
+        """Build a ManagerAgent with a mock LLM injected — no genai patching needed."""
         from rag_system.agents.manager import ManagerAgent
-        return ManagerAgent(agent_id="test", mcp_url="http://localhost:8000", api_key="fake-key"), mock_model
+        from rag_system.llm.base import BaseLLM, LLMConfig
 
-    @patch("rag_system.agents.manager.genai")
-    def test_should_not_retrieve_for_math(self, mock_genai):
-        manager, mock_model = self._make_manager(mock_genai)
-        mock_model.generate_content.return_value.text = "no"
+        mock_llm = MagicMock(spec=BaseLLM)
+        mock_llm.config = LLMConfig(model_name="fake-model")
+        mock_llm.__repr__ = lambda self: "MockLLM(model=fake-model)"
+        manager = ManagerAgent(agent_id="test", mcp_url="http://localhost:8000", llm=mock_llm)
+        return manager, mock_llm
+
+    def test_should_not_retrieve_for_math(self):
+        manager, mock_llm = self._make_manager()
+        mock_llm.generate.return_value = "no"
         result = manager._should_use_retrieval("What is 2+2?", ["document_retriever"])
         assert result is False
 
-    @patch("rag_system.agents.manager.genai")
-    def test_should_retrieve_for_domain_question(self, mock_genai):
-        manager, mock_model = self._make_manager(mock_genai)
-        mock_model.generate_content.return_value.text = "yes"
+    def test_should_retrieve_for_domain_question(self):
+        manager, mock_llm = self._make_manager()
+        mock_llm.generate.return_value = "yes"
         result = manager._should_use_retrieval(
             "What is the churn model AUC-ROC?", ["document_retriever"]
         )
         assert result is True
 
-    @patch("rag_system.agents.manager.genai")
-    def test_no_retrieval_when_tool_missing(self, mock_genai):
-        manager, _ = self._make_manager(mock_genai)
+    def test_no_retrieval_when_tool_missing(self):
+        manager, _ = self._make_manager()
         result = manager._should_use_retrieval("Any question", [])
         assert result is False
 
-    @patch("rag_system.agents.manager.genai")
-    def test_select_specialist_returns_none_for_empty(self, mock_genai):
-        manager, _ = self._make_manager(mock_genai)
+    def test_select_specialist_returns_none_for_empty(self):
+        manager, _ = self._make_manager()
         assert manager._select_specialist("test", []) is None
 
-    @patch("rag_system.agents.manager.genai")
-    def test_select_specialist_picks_best_match(self, mock_genai):
-        manager, _ = self._make_manager(mock_genai)
+    def test_select_specialist_picks_best_match(self):
+        manager, _ = self._make_manager()
         specialists = [
             {
                 "agent_id": "climate_spec",
@@ -361,16 +361,14 @@ class TestManagerAgent:
         selected = manager._select_specialist("churn model metrics", specialists)
         assert selected["agent_id"] == "ml_spec"
 
-    @patch("rag_system.agents.manager.genai")
-    def test_synthesize_no_results_returns_fallback(self, mock_genai):
-        manager, _ = self._make_manager(mock_genai)
+    def test_synthesize_no_results_returns_fallback(self):
+        manager, _ = self._make_manager()
         answer = manager._synthesize_answer("What is X?", {"results": []})
         assert "couldn't find" in answer.lower()
 
-    @patch("rag_system.agents.manager.genai")
-    def test_synthesize_calls_gemini_with_context(self, mock_genai):
-        manager, mock_model = self._make_manager(mock_genai)
-        mock_model.generate_content.return_value.text = "The answer is 42."
+    def test_synthesize_calls_gemini_with_context(self):
+        manager, mock_llm = self._make_manager()
+        mock_llm.generate.return_value = "The answer is 42."
         results = {
             "results": [
                 {
@@ -382,7 +380,7 @@ class TestManagerAgent:
         }
         answer = manager._synthesize_answer("What is the answer?", results)
         assert answer == "The answer is 42."
-        mock_model.generate_content.assert_called_once()
+        mock_llm.generate.assert_called_once()
 
 
 # ===========================================================================

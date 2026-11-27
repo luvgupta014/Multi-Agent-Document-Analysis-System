@@ -2,27 +2,20 @@
 Manager Agent — the user-facing orchestrator.
 
 Decides whether a question requires document retrieval, routes it to the
-appropriate specialist via MCP, and synthesizes a final answer using Gemini.
+appropriate specialist via MCP, and synthesizes a final answer using the
+configured LLM (Gemini, OpenAI, or Ollama — set via config.yaml).
 
-Gemini API calls are wrapped with exponential-backoff retry (tenacity) to
-handle transient 429 ResourceExhausted errors gracefully.
+LLM calls are wrapped with exponential-backoff retry (tenacity) inside
+each backend implementation.
 """
 from typing import List, Dict, Any, Optional
 import time
 import httpx
-import google.generativeai as genai
-import google.api_core.exceptions
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log,
-)
 from loguru import logger
 
 from rag_system.mcp_server.models import Message
 from rag_system.utils.metrics import MetricsCollector, QueryMetric
+from rag_system.llm.base import BaseLLM, LLMError
 
 
 SYNTHESIS_SYSTEM_PROMPT = """You are a meticulous technical analyst. Your job is to synthesize a clear, concise answer based only on the provided context and the user's question. You must:
@@ -39,33 +32,36 @@ class ManagerAgent:
         mcp_url: str = "http://localhost:8000",
         api_key: Optional[str] = None,
         model_name: str = "gemini-2.5-flash",
+        llm: Optional[BaseLLM] = None,
     ):
         self.agent_id = agent_id
         self.mcp_url = mcp_url
-
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY is required!")
-
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
-        self.model_name = model_name
         self.metrics = MetricsCollector()
-        logger.info(f"Manager agent '{agent_id}' initialized with {model_name}")
+
+        if llm is not None:
+            # Injected directly (e.g. from factory or tests)
+            self._llm = llm
+        else:
+            # Legacy path: build Gemini from explicit api_key + model_name
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY is required!")
+            from rag_system.llm.gemini import GeminiLLM
+            from rag_system.llm.base import LLMConfig
+            self._llm = GeminiLLM(LLMConfig(
+                provider="gemini",
+                model_name=model_name,
+                api_key=api_key,
+            ))
+
+        logger.info(f"Manager agent '{agent_id}' initialised with {self._llm}")
 
     # ------------------------------------------------------------------
-    # Gemini API call with retry/backoff
+    # LLM call — delegates to whatever backend is configured
     # ------------------------------------------------------------------
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(google.api_core.exceptions.ResourceExhausted),
-        reraise=True,
-    )
-    def _call_gemini(self, prompt: str) -> str:
-        """Call Gemini with automatic retry on 429 rate-limit errors."""
-        response = self.model.generate_content(prompt)
-        return response.text
+    def _call_llm(self, prompt: str) -> str:
+        """Call the configured LLM. Raises LLMError on failure."""
+        return self._llm.generate(prompt)
 
     # ------------------------------------------------------------------
     # Decision: does this question need retrieval?
@@ -85,7 +81,7 @@ Should the document_retriever tool be used to answer this question?
 Reply with ONLY "yes" or "no"."""
 
         try:
-            decision = self._call_gemini(prompt).strip().lower()
+            decision = self._call_llm(prompt).strip().lower()
             use_tool = "yes" in decision
             logger.info(
                 f"LLM tool decision for '{question[:50]}...': "
@@ -220,12 +216,12 @@ Provide a clear, concise answer with source citations."""
 
         t_start = time.time()
         try:
-            answer = self._call_gemini(prompt)
+            answer = self._call_llm(prompt)
             latency_ms = (time.time() - t_start) * 1000
-            logger.info(f"Gemini synthesis latency: {latency_ms:.1f}ms")
+            logger.info(f"LLM synthesis latency: {latency_ms:.1f}ms")
             return answer
         except Exception as e:
-            logger.error(f"Gemini API error: {e}")
+            logger.error(f"LLM API error: {e}")
             return f"Error generating answer: {str(e)}"
 
     # ------------------------------------------------------------------
@@ -262,7 +258,7 @@ Provide a clear, concise answer with source citations."""
 
             if not should_retrieve:
                 try:
-                    answer = self._call_gemini(question)
+                    answer = self._call_llm(question)
                     return {
                         "question": question,
                         "answer": answer,

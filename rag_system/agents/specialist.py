@@ -1,14 +1,15 @@
 from fastapi import FastAPI, HTTPException, status
-from typing import List, Dict
+from typing import List, Dict, Optional
 from loguru import logger
 import os
 
 from rag_system.knowledge_base.vector_store import VectorStore
+from rag_system.knowledge_base.base_store import BaseVectorStore, ChromaVectorStore
 from rag_system.mcp_server.models import Tool, AgentRegistration, Message
 
 
 class SpecialistAgent:
-    """Wraps a ChromaDB vector store behind a FastAPI service"""
+    """Wraps a vector store behind a FastAPI service."""
 
     def __init__(
         self,
@@ -17,7 +18,8 @@ class SpecialistAgent:
         description: str,
         collection_name: str,
         port: int = 8001,
-        persist_dir: str = "./chroma_db"
+        persist_dir: str = "./chroma_db",
+        vector_store: Optional[BaseVectorStore] = None,
     ):
         self.agent_id = agent_id
         self.name = name
@@ -30,12 +32,17 @@ class SpecialistAgent:
             version="1.0.0"
         )
 
-        self.vector_store = VectorStore(
-            collection_name=collection_name,
-            persist_dir=persist_dir
-        )
+        if vector_store is not None:
+            self.vector_store: BaseVectorStore = vector_store
+        else:
+            # Default: wrap a ChromaDB VectorStore
+            raw_vs = VectorStore(
+                collection_name=collection_name,
+                persist_dir=persist_dir
+            )
+            self.vector_store = ChromaVectorStore(raw_vs)
 
-        doc_count = self.vector_store.collection.count()
+        doc_count = self.vector_store.count()
         if doc_count == 0:
             logger.warning("Knowledge base is empty. Run setup_knowledge_base.py first.")
         else:
@@ -88,7 +95,6 @@ class SpecialistAgent:
 
             try:
                 results = self.vector_store.search(query, top_k=top_k)
-
                 return {
                     "agent_id": self.agent_id,
                     "agent_name": self.name,
@@ -109,7 +115,7 @@ class SpecialistAgent:
                 "status": "healthy",
                 "agent_id": self.agent_id,
                 "agent_name": self.name,
-                "documents_indexed": self.vector_store.collection.count(),
+                "documents_indexed": self.vector_store.count(),
                 "tools": [t.name for t in self.get_tools()]
             }
 

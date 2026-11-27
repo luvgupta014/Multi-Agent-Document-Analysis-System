@@ -3,6 +3,14 @@ gemini:
   temperature: 0.3
   max_output_tokens: 2048
 
+llm:
+  provider: gemini          # options: gemini, openai, ollama
+  model_name: gemini-2.5-flash
+  temperature: 0.3
+  max_tokens: 2048
+  # base_url:               # for ollama (default: http://localhost:11434)
+  #                         # or any OpenAI-compatible endpoint
+
 mcp_server:
   host: 0.0.0.0
   port: 8000
