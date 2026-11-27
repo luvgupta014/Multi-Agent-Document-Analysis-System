@@ -4,6 +4,9 @@ sentence-transformers==3.0.0
 chromadb==0.5.0
 numpy==1.26.4
 
+# Retrieval
+rank-bm25==0.2.2            # BM25 lexical search for hybrid retrieval
+
 # LLM retry / resilience
 tenacity==8.5.0
 

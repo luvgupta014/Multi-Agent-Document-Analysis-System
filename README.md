@@ -189,10 +189,36 @@ The Manager REST API (port 8002) exposes:
 | Query state | Stateless per-query | Keeps context window clean; conversation history is an additive feature |
 | Retry strategy | Exponential backoff (tenacity) | Handles 429 rate limits gracefully without crashing |
 
+## Retrieval Evaluation
+
+Measured on 30 hand-written questions across all 5 documents (`eval/golden_qa.yaml`).
+
+| Metric | Dense only (baseline) | Hybrid BM25+Dense + RRF |
+|--------|----------------------:|------------------------:|
+| Recall@1 | 0.233 | **0.367** |
+| Recall@3 | 0.500 | **0.600** |
+| Recall@5 | 0.767 | 0.733 |
+| Recall@10 | 0.867 | **0.933** |
+| MRR | 0.439 | **0.536** |
+
+Hybrid retrieval (BM25 + dense vector search fused with Reciprocal Rank Fusion) improves precision at Recall@1 by **57%** and MRR by **22%**, making it significantly better at finding the right chunk on the first try. Toggle settings in `config.yaml`:
+
+```yaml
+retrieval:
+  hybrid: true    # BM25 + dense search with RRF
+  rerank: false   # cross-encoder re-ranking (slower, more accurate)
+chunking:
+  strategy: recursive   # or: sentence_aware
+```
+
+Run the evaluation yourself:
+```bash
+python eval/run_eval.py --no-ragas
+```
+
 ## Known Limitations & Roadmap
 
-- **Chunking:** Sentence-aware splitting with fixed overlap. Semantic chunking would improve retrieval quality for longer documents.
-- **Re-ranking:** Raw similarity results go to Gemini; a cross-encoder re-ranker (e.g. `ms-marco-MiniLM-L-6-v2`) would improve answer precision.
+- **Re-ranking:** Cross-encoder re-ranker (`ms-marco-MiniLM-L-6-v2`) is wired in and toggleable via `retrieval.rerank: true` in `config.yaml` — enable it to trade latency for precision.
 - **Multiple specialists:** Registry supports N specialists; routing logic (beyond keyword scoring) needs an embedding-based similarity approach for production.
 - **Conversation history:** Each query is stateless. A session-aware mode with a rolling context window is the next planned feature.
 - **Similarity threshold:** Currently configurable via `config.yaml`; threshold tuning on a labeled eval set would improve precision/recall trade-off.
@@ -243,7 +269,7 @@ pytest tests/ -v
 pytest tests/ -v --cov=rag_system --cov-report=term-missing
 ```
 
-35+ tests covering models, registry, document loading, MCP endpoints, manager logic, and metrics.
+82 tests covering models, registry, document loading, MCP endpoints, manager logic, retrieval metrics, hybrid search, and chunking strategies.
 
 ## Troubleshooting
 

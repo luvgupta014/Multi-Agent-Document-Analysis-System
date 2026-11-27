@@ -27,6 +27,64 @@ class Document:
 class DocumentLoader:
 
     @staticmethod
+    def recursive_chunk_text(
+        text: str, chunk_size: int = 500, overlap: int = 50
+    ) -> List[str]:
+        """
+        Recursive character-level chunking.
+
+        Tries to split on paragraph breaks first, then sentences, then words,
+        then characters — whatever keeps each chunk under ``chunk_size``.
+        This mirrors LangChain's RecursiveCharacterTextSplitter logic without
+        the dependency.
+        """
+        separators = ["\n\n", "\n", ". ", " ", ""]
+
+        def _split(txt: str, seps: List[str]) -> List[str]:
+            if not txt.strip():
+                return []
+            if len(txt) <= chunk_size or not seps:
+                return [txt]
+
+            sep = seps[0]
+            parts = txt.split(sep) if sep else list(txt)
+            chunks: List[str] = []
+            current: List[str] = []
+            current_len = 0
+
+            for part in parts:
+                part_len = len(part) + len(sep)
+                if current_len + part_len > chunk_size and current:
+                    chunk_text = sep.join(current)
+                    # recursively refine if still too big
+                    chunks.extend(_split(chunk_text, seps[1:]))
+                    # carry overlap
+                    overlap_parts: List[str] = []
+                    ol = 0
+                    for p in reversed(current):
+                        if ol + len(p) > overlap:
+                            break
+                        overlap_parts.insert(0, p)
+                        ol += len(p) + len(sep)
+                    current = overlap_parts
+                    current_len = ol
+                current.append(part)
+                current_len += part_len
+
+            if current:
+                chunks.extend(_split(sep.join(current), seps[1:]))
+            return chunks
+
+        raw = _split(text, separators)
+        # deduplicate consecutive identical chunks (can arise from overlap)
+        seen: List[str] = []
+        for c in raw:
+            c = c.strip()
+            if c and (not seen or c != seen[-1]):
+                seen.append(c)
+        return seen
+
+    @staticmethod
     def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
         """
         Split text into overlapping chunks on sentence boundaries.
@@ -66,7 +124,9 @@ class DocumentLoader:
         return chunks
 
     @staticmethod
-    def load_text_file(filepath: str, chunk_size: int = 500) -> List[Document]:
+    def load_text_file(
+        filepath: str, chunk_size: int = 500, strategy: str = "sentence_aware"
+    ) -> List[Document]:
         """Load and chunk a plain-text (.txt) document."""
         path = Path(filepath)
 
@@ -75,7 +135,10 @@ class DocumentLoader:
             return []
 
         text = path.read_text(encoding="utf-8")
-        chunks = DocumentLoader.chunk_text(text, chunk_size=chunk_size)
+        if strategy == "recursive":
+            chunks = DocumentLoader.recursive_chunk_text(text, chunk_size=chunk_size)
+        else:
+            chunks = DocumentLoader.chunk_text(text, chunk_size=chunk_size)
 
         documents = []
         for i, chunk in enumerate(chunks):
@@ -97,7 +160,9 @@ class DocumentLoader:
         return documents
 
     @staticmethod
-    def load_pdf_file(filepath: str, chunk_size: int = 500) -> List[Document]:
+    def load_pdf_file(
+        filepath: str, chunk_size: int = 500, strategy: str = "sentence_aware"
+    ) -> List[Document]:
         """
         Load and chunk a PDF document.
 
@@ -124,7 +189,10 @@ class DocumentLoader:
             logger.warning(f"No text extracted from {path.name} (may be a scanned/image PDF)")
             return []
 
-        chunks = DocumentLoader.chunk_text(full_text, chunk_size=chunk_size)
+        if strategy == "recursive":
+            chunks = DocumentLoader.recursive_chunk_text(full_text, chunk_size=chunk_size)
+        else:
+            chunks = DocumentLoader.chunk_text(full_text, chunk_size=chunk_size)
 
         documents = []
         for i, chunk in enumerate(chunks):
@@ -151,6 +219,7 @@ class DocumentLoader:
         dirpath: str,
         pattern: str = "*",
         chunk_size: int = 500,
+        strategy: str = "sentence_aware",
     ) -> List[Document]:
         """
         Load all supported documents (.txt, .pdf) from a directory.
@@ -170,9 +239,9 @@ class DocumentLoader:
             if not filepath.is_file():
                 continue
             if filepath.suffix == ".txt":
-                docs = DocumentLoader.load_text_file(str(filepath), chunk_size)
+                docs = DocumentLoader.load_text_file(str(filepath), chunk_size, strategy)
             elif filepath.suffix == ".pdf":
-                docs = DocumentLoader.load_pdf_file(str(filepath), chunk_size)
+                docs = DocumentLoader.load_pdf_file(str(filepath), chunk_size, strategy)
             else:
                 continue
             all_docs.extend(docs)

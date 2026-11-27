@@ -30,10 +30,12 @@ embedding:
 retrieval:
   top_k: 5
   similarity_threshold: 0.3  # discard chunks below this cosine similarity score
-  rerank: false              # set true when cross-encoder re-ranking is added
+  hybrid: true               # BM25 + dense vector search fused with RRF
+  rerank: false              # cross-encoder re-ranking (slower but more accurate)
+  rrf_k: 60                  # RRF constant; higher = less weight on rank position
 
 chunking:
-  strategy: sentence_aware   # options: sentence_aware (current), fixed, semantic (future)
+  strategy: recursive        # options: sentence_aware, recursive
 
 logging:
   level: INFO

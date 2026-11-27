@@ -3,16 +3,30 @@ from rag_system.knowledge_base.vector_store import VectorStore
 from dotenv import load_dotenv
 from loguru import logger
 import os
+import yaml
 
 load_dotenv()
 
 
+def _load_config() -> dict:
+    cfg_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    if os.path.exists(cfg_path):
+        with open(cfg_path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
 def setup_knowledge_base():
-    doc_dir = os.getenv("KB_DOC_DIR", "docs/sample_documents")
-    persist_dir = os.getenv("KB_PERSIST_DIR", "./chroma_db")
-    chunk_size = int(os.getenv("KB_CHUNK_SIZE", "500"))
-    collection = os.getenv("SPECIALIST_COLLECTION", "climate_docs")
+    cfg = _load_config()
+    kb = cfg.get("knowledge_base", {})
+    chunking_cfg = cfg.get("chunking", {})
+
+    doc_dir = os.getenv("KB_DOC_DIR", kb.get("doc_dir", "docs/sample_documents"))
+    persist_dir = os.getenv("KB_PERSIST_DIR", kb.get("persist_dir", "./chroma_db"))
+    chunk_size = int(os.getenv("KB_CHUNK_SIZE", str(kb.get("chunk_size", 500))))
+    collection = os.getenv("SPECIALIST_COLLECTION", cfg.get("specialist", {}).get("collection_name", "climate_docs"))
     force_reload = os.getenv("FORCE_RELOAD", "false").lower() == "true"
+    strategy = chunking_cfg.get("strategy", "sentence_aware")
 
     os.makedirs(doc_dir, exist_ok=True)
     os.makedirs(persist_dir, exist_ok=True)
@@ -22,10 +36,12 @@ def setup_knowledge_base():
         logger.error(f"No documents found in {doc_dir}")
         return
 
+    logger.info(f"Chunking strategy: {strategy}")
     documents = DocumentLoader.load_directory(
         dirpath=doc_dir,
         pattern="*.txt",
-        chunk_size=chunk_size
+        chunk_size=chunk_size,
+        strategy=strategy,
     )
 
     if not documents:

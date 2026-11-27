@@ -34,6 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from rag_system.knowledge_base.vector_store import VectorStore
 from rag_system.knowledge_base.loader import DocumentLoader
+from rag_system.knowledge_base.retriever import HybridRetriever
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +71,7 @@ def reciprocal_rank(retrieved_ids: List[str], relevant_ids: List[str]) -> float:
 
 def run_retrieval_eval(
     questions: List[Dict],
-    vector_store: VectorStore,
+    vector_store,  # VectorStore or HybridRetriever — both have .search()
     k_values: List[int],
 ) -> Dict[str, Any]:
     """Run recall@k and MRR for all questions."""
@@ -264,6 +265,7 @@ def main():
 
     cfg = load_config()
     kb_cfg = cfg.get("knowledge_base", {})
+    retrieval_cfg = cfg.get("retrieval", {})
     collection = args.collection or cfg.get("specialist", {}).get("collection_name", "climate_docs")
     persist_dir = kb_cfg.get("persist_dir", "./chroma_db")
     embed_model = cfg.get("embedding", {}).get("model_name", "all-MiniLM-L6-v2")
@@ -282,13 +284,20 @@ def main():
         sys.exit(1)
     logger.info(f"Vector store ready: {doc_count} chunks indexed")
 
+    # Build retriever (hybrid if enabled in config)
+    hybrid = retrieval_cfg.get("hybrid", False)
+    rerank = retrieval_cfg.get("rerank", False)
+    rrf_k = retrieval_cfg.get("rrf_k", 60)
+    logger.info(f"Retriever: hybrid={hybrid}, rerank={rerank}, rrf_k={rrf_k}")
+    retriever = HybridRetriever(vs, hybrid=hybrid, rerank=rerank, rrf_k=rrf_k)
+
     questions = load_golden_qa()
     logger.info(f"Loaded {len(questions)} golden questions")
 
     t0 = time.time()
 
     logger.info("Running retrieval evaluation...")
-    retrieval = run_retrieval_eval(questions, vs, k_values=args.k)
+    retrieval = run_retrieval_eval(questions, retriever, k_values=args.k)
 
     ragas = {"skipped": True, "reason": "disabled via --no-ragas"}
     if not args.no_ragas:
