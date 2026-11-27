@@ -1,5 +1,5 @@
-from syfe_assignment.knowledge_base.loader import DocumentLoader
-from syfe_assignment.knowledge_base.vector_store import VectorStore
+from rag_system.knowledge_base.loader import DocumentLoader
+from rag_system.knowledge_base.vector_store import VectorStore
 from dotenv import load_dotenv
 from loguru import logger
 import os

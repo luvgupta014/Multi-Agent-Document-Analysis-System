@@ -1,10 +1,41 @@
+"""
+Test suite for the Multi-Agent Document Analysis System.
+
+Covers:
+- Pydantic models (Tool, AgentRegistration, Message, MessageResponse)
+- AgentRegistry (register, unregister, find, list, stats)
+- DocumentLoader (chunking, txt loading, directory loading, error paths)
+- VectorStore stats helper
+- MCP Server HTTP endpoints (via FastAPI TestClient)
+- ManagerAgent logic (_should_use_retrieval, _select_specialist, _synthesize_answer)
+- MetricsCollector (record, summary, reset)
+- REST API health endpoint
+"""
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
-from syfe_assignment.mcp_server.models import Tool, AgentRegistration, Message, MessageResponse
-from syfe_assignment.mcp_server.registry import AgentRegistry
-from syfe_assignment.knowledge_base.loader import Document, DocumentLoader
+from rag_system.mcp_server.models import Tool, AgentRegistration, Message, MessageResponse
+from rag_system.mcp_server.registry import AgentRegistry
+from rag_system.knowledge_base.loader import Document, DocumentLoader
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_registration(agent_id: str = "agent1", name: str = "Agent 1") -> AgentRegistration:
+    return AgentRegistration(
+        agent_id=agent_id,
+        name=name,
+        description="Test agent",
+        tools=[Tool(name="document_retriever", description="retrieve docs")],
+        endpoint="http://localhost:8001",
+    )
+
+
+# ===========================================================================
+# TestModels
+# ===========================================================================
 
 class TestModels:
 
@@ -14,66 +45,62 @@ class TestModels:
         assert tool.description == "Search docs"
 
     def test_agent_registration(self):
-        reg = AgentRegistration(
-            agent_id="test_agent",
-            name="Test Agent",
-            description="A test agent",
-            tools=[Tool(name="search", description="search docs")],
-            endpoint="http://localhost:9999"
-        )
-        assert reg.agent_id == "test_agent"
+        reg = _make_registration()
+        assert reg.agent_id == "agent1"
         assert len(reg.tools) == 1
-        assert reg.endpoint == "http://localhost:9999"
+        assert reg.endpoint == "http://localhost:8001"
 
     def test_message_creation(self):
         msg = Message(
             sender="manager",
             recipient="specialist",
             tool="document_retriever",
-            parameters={"query": "test"}
+            parameters={"query": "test"},
         )
         assert msg.sender == "manager"
         assert msg.recipient == "specialist"
         assert msg.message_id is not None
         assert msg.timestamp is not None
 
-    def test_message_response(self):
+    def test_message_response_success(self):
         resp = MessageResponse(
             message_id="test-id",
             success=True,
-            result={"data": "test"}
+            result={"data": "test"},
         )
         assert resp.success is True
         assert resp.result == {"data": "test"}
         assert resp.error is None
 
+    def test_message_response_failure(self):
+        resp = MessageResponse(
+            message_id="err-id",
+            success=False,
+            error="something went wrong",
+        )
+        assert resp.success is False
+        assert resp.error == "something went wrong"
+
+
+# ===========================================================================
+# TestRegistry
+# ===========================================================================
 
 class TestRegistry:
 
     def setup_method(self):
         self.registry = AgentRegistry()
 
-    def _make_registration(self, agent_id="agent1", name="Agent 1"):
-        return AgentRegistration(
-            agent_id=agent_id,
-            name=name,
-            description="Test agent",
-            tools=[Tool(name="document_retriever", description="retrieve docs")],
-            endpoint=f"http://localhost:8001"
-        )
-
     def test_register_agent(self):
-        reg = self._make_registration()
-        assert self.registry.register_agent(reg) is True
+        assert self.registry.register_agent(_make_registration()) is True
 
     def test_register_duplicate(self):
-        reg = self._make_registration()
+        reg = _make_registration()
         self.registry.register_agent(reg)
         assert self.registry.register_agent(reg) is False
 
     def test_get_agent(self):
-        reg = self._make_registration()
-        self.registry.register_agent(reg)
+        self.registry.register_agent(_make_registration())
         agent = self.registry.get_agent("agent1")
         assert agent is not None
         assert agent.name == "Agent 1"
@@ -82,23 +109,23 @@ class TestRegistry:
         assert self.registry.get_agent("nonexistent") is None
 
     def test_list_agents(self):
-        self.registry.register_agent(self._make_registration("a1", "Agent A"))
-        self.registry.register_agent(self._make_registration("a2", "Agent B"))
+        self.registry.register_agent(_make_registration("a1", "Agent A"))
+        self.registry.register_agent(_make_registration("a2", "Agent B"))
         agents = self.registry.list_agents()
         assert len(agents) == 2
 
     def test_find_agents_with_tool(self):
-        self.registry.register_agent(self._make_registration())
+        self.registry.register_agent(_make_registration())
         found = self.registry.find_agents_with_tool("document_retriever")
         assert len(found) == 1
 
     def test_find_agents_no_match(self):
-        self.registry.register_agent(self._make_registration())
+        self.registry.register_agent(_make_registration())
         found = self.registry.find_agents_with_tool("nonexistent_tool")
         assert len(found) == 0
 
     def test_unregister_agent(self):
-        self.registry.register_agent(self._make_registration())
+        self.registry.register_agent(_make_registration())
         assert self.registry.unregister_agent("agent1") is True
         assert self.registry.get_agent("agent1") is None
 
@@ -106,11 +133,15 @@ class TestRegistry:
         assert self.registry.unregister_agent("nonexistent") is False
 
     def test_stats(self):
-        self.registry.register_agent(self._make_registration())
+        self.registry.register_agent(_make_registration())
         stats = self.registry.get_stats()
         assert stats["total_agents"] == 1
         assert len(stats["agents"]) == 1
 
+
+# ===========================================================================
+# TestDocumentLoader
+# ===========================================================================
 
 class TestDocumentLoader:
 
@@ -137,6 +168,14 @@ class TestDocumentLoader:
         chunks = DocumentLoader.chunk_text(text, chunk_size=40, overlap=20)
         assert len(chunks) >= 1
 
+    def test_chunk_text_preserves_content(self):
+        text = "Alpha. Beta. Gamma."
+        chunks = DocumentLoader.chunk_text(text, chunk_size=1000, overlap=0)
+        # All content should fit in one chunk
+        assert len(chunks) == 1
+        full = " ".join(chunks)
+        assert "Alpha" in full
+
     def test_load_nonexistent_file(self):
         docs = DocumentLoader.load_text_file("nonexistent_file.txt")
         assert docs == []
@@ -145,12 +184,48 @@ class TestDocumentLoader:
         docs = DocumentLoader.load_directory("nonexistent_dir")
         assert docs == []
 
+    def test_load_pdf_missing_pypdf(self):
+        """load_pdf_file should return [] when pypdf is not importable."""
+        with patch.dict("sys.modules", {"pypdf": None}):
+            docs = DocumentLoader.load_pdf_file("some_file.pdf")
+            assert docs == []
+
+    def test_load_pdf_nonexistent_file(self):
+        """load_pdf_file should return [] for a missing file."""
+        docs = DocumentLoader.load_pdf_file("does_not_exist.pdf")
+        assert docs == []
+
+    def test_load_text_file_produces_metadata(self, tmp_path):
+        """Check that loaded documents carry expected metadata keys."""
+        f = tmp_path / "sample.txt"
+        f.write_text("Hello world. This is a test sentence. And another one.")
+        docs = DocumentLoader.load_text_file(str(f))
+        assert len(docs) >= 1
+        meta = docs[0].metadata
+        assert "filename" in meta
+        assert "chunk_index" in meta
+        assert "file_type" in meta
+        assert meta["file_type"] == "txt"
+
+    def test_load_directory_mixed_extensions(self, tmp_path):
+        """Directory loader should process .txt and skip unsupported types."""
+        (tmp_path / "a.txt").write_text("Some text here. More text. Even more.")
+        (tmp_path / "b.md").write_text("# Markdown — should be ignored")
+        docs = DocumentLoader.load_directory(str(tmp_path))
+        filenames = [d.metadata["filename"] for d in docs]
+        assert any("a.txt" in f for f in filenames)
+        assert not any("b.md" in f for f in filenames)
+
+
+# ===========================================================================
+# TestMCPServer
+# ===========================================================================
 
 class TestMCPServer:
 
     @pytest.fixture
     def client(self):
-        from syfe_assignment.mcp_server.server import app
+        from rag_system.mcp_server.server import app
         from fastapi.testclient import TestClient
         return TestClient(app)
 
@@ -167,12 +242,11 @@ class TestMCPServer:
             "name": "Test Specialist",
             "description": "Test description",
             "tools": [{"name": "document_retriever", "description": "retrieve docs", "parameters": {}}],
-            "endpoint": "http://localhost:9999"
+            "endpoint": "http://localhost:9999",
         }
         response = client.post("/register", json=payload)
         assert response.status_code == 201
-        data = response.json()
-        assert data["status"] == "registered"
+        assert response.json()["status"] == "registered"
 
     def test_register_duplicate(self, client):
         payload = {
@@ -180,7 +254,7 @@ class TestMCPServer:
             "name": "Dup Agent",
             "description": "Test",
             "tools": [],
-            "endpoint": "http://localhost:9999"
+            "endpoint": "http://localhost:9999",
         }
         client.post("/register", json=payload)
         response = client.post("/register", json=payload)
@@ -204,12 +278,11 @@ class TestMCPServer:
             "sender": "manager",
             "recipient": "nonexistent_agent_xyz",
             "tool": "document_retriever",
-            "parameters": {"query": "test"}
+            "parameters": {"query": "test"},
         }
         response = client.post("/send", json=payload)
         assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
+        assert response.json()["success"] is False
 
     def test_mcp_tools_endpoint(self, client):
         payload = {
@@ -217,7 +290,7 @@ class TestMCPServer:
             "name": "Tools Test Agent",
             "description": "Test",
             "tools": [{"name": "document_retriever", "description": "retrieve docs", "parameters": {}}],
-            "endpoint": "http://localhost:9998"
+            "endpoint": "http://localhost:9998",
         }
         client.post("/register", json=payload)
         response = client.get("/mcp/v1/tools")
@@ -228,10 +301,98 @@ class TestMCPServer:
         assert "document_retriever" in tool_names
 
 
+# ===========================================================================
+# TestManagerAgent
+# ===========================================================================
+
+class TestManagerAgent:
+    """Unit tests for ManagerAgent logic (no network calls)."""
+
+    def _make_manager(self, mock_genai):
+        mock_model = MagicMock()
+        mock_genai.GenerativeModel.return_value = mock_model
+        from rag_system.agents.manager import ManagerAgent
+        return ManagerAgent(agent_id="test", mcp_url="http://localhost:8000", api_key="fake-key"), mock_model
+
+    @patch("rag_system.agents.manager.genai")
+    def test_should_not_retrieve_for_math(self, mock_genai):
+        manager, mock_model = self._make_manager(mock_genai)
+        mock_model.generate_content.return_value.text = "no"
+        result = manager._should_use_retrieval("What is 2+2?", ["document_retriever"])
+        assert result is False
+
+    @patch("rag_system.agents.manager.genai")
+    def test_should_retrieve_for_domain_question(self, mock_genai):
+        manager, mock_model = self._make_manager(mock_genai)
+        mock_model.generate_content.return_value.text = "yes"
+        result = manager._should_use_retrieval(
+            "What is the churn model AUC-ROC?", ["document_retriever"]
+        )
+        assert result is True
+
+    @patch("rag_system.agents.manager.genai")
+    def test_no_retrieval_when_tool_missing(self, mock_genai):
+        manager, _ = self._make_manager(mock_genai)
+        result = manager._should_use_retrieval("Any question", [])
+        assert result is False
+
+    @patch("rag_system.agents.manager.genai")
+    def test_select_specialist_returns_none_for_empty(self, mock_genai):
+        manager, _ = self._make_manager(mock_genai)
+        assert manager._select_specialist("test", []) is None
+
+    @patch("rag_system.agents.manager.genai")
+    def test_select_specialist_picks_best_match(self, mock_genai):
+        manager, _ = self._make_manager(mock_genai)
+        specialists = [
+            {
+                "agent_id": "climate_spec",
+                "name": "Climate Specialist",
+                "description": "climate energy environment",
+                "tools": [{"name": "document_retriever"}],
+            },
+            {
+                "agent_id": "ml_spec",
+                "name": "ML Specialist",
+                "description": "machine learning models metrics",
+                "tools": [{"name": "document_retriever"}],
+            },
+        ]
+        selected = manager._select_specialist("churn model metrics", specialists)
+        assert selected["agent_id"] == "ml_spec"
+
+    @patch("rag_system.agents.manager.genai")
+    def test_synthesize_no_results_returns_fallback(self, mock_genai):
+        manager, _ = self._make_manager(mock_genai)
+        answer = manager._synthesize_answer("What is X?", {"results": []})
+        assert "couldn't find" in answer.lower()
+
+    @patch("rag_system.agents.manager.genai")
+    def test_synthesize_calls_gemini_with_context(self, mock_genai):
+        manager, mock_model = self._make_manager(mock_genai)
+        mock_model.generate_content.return_value.text = "The answer is 42."
+        results = {
+            "results": [
+                {
+                    "content": "Some relevant text",
+                    "metadata": {"filename": "doc.txt", "chunk_index": 0},
+                    "similarity": 0.9,
+                }
+            ]
+        }
+        answer = manager._synthesize_answer("What is the answer?", results)
+        assert answer == "The answer is 42."
+        mock_model.generate_content.assert_called_once()
+
+
+# ===========================================================================
+# TestMetrics
+# ===========================================================================
+
 class TestMetrics:
 
     def test_metrics_collector(self):
-        from syfe_assignment.utils.metrics import MetricsCollector, QueryMetric
+        from rag_system.utils.metrics import MetricsCollector, QueryMetric
 
         collector = MetricsCollector()
         collector.start_timer()
@@ -243,7 +404,7 @@ class TestMetrics:
             synthesis_time=0.2,
             total_time=0.3,
             results_count=5,
-            success=True
+            success=True,
         )
         collector.record_query(metric)
 
@@ -253,7 +414,51 @@ class TestMetrics:
         assert summary["success_rate"] == 100.0
 
     def test_empty_metrics(self):
-        from syfe_assignment.utils.metrics import MetricsCollector
+        from rag_system.utils.metrics import MetricsCollector
         collector = MetricsCollector()
         summary = collector.get_summary()
         assert summary["total_queries"] == 0
+
+    def test_metrics_reset(self):
+        from rag_system.utils.metrics import MetricsCollector, QueryMetric
+        collector = MetricsCollector()
+        collector.record_query(
+            QueryMetric("q", "s", 0.1, 0.1, 0.2, 3, True)
+        )
+        assert collector.get_summary()["total_queries"] == 1
+        collector.reset()
+        assert collector.get_summary()["total_queries"] == 0
+
+    def test_failed_metrics_tracked(self):
+        from rag_system.utils.metrics import MetricsCollector, QueryMetric
+        collector = MetricsCollector()
+        collector.record_query(QueryMetric("q1", "s", 0.1, 0.1, 0.2, 0, success=False))
+        collector.record_query(QueryMetric("q2", "s", 0.1, 0.2, 0.3, 5, success=True))
+        summary = collector.get_summary()
+        assert summary["failed"] == 1
+        assert summary["successful"] == 1
+        assert summary["success_rate"] == 50.0
+
+
+# ===========================================================================
+# TestRestAPI
+# ===========================================================================
+
+class TestRestAPI:
+
+    @pytest.fixture
+    def api_client(self):
+        from rag_system.api.app import app
+        from fastapi.testclient import TestClient
+        # Provide a dummy key so the manager tries to init but we'll mock it
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "fake-key"}):
+            with TestClient(app) as client:
+                yield client
+
+    def test_api_health(self, api_client):
+        response = api_client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert data["service"] == "Manager REST API"
+        assert "manager_ready" in data

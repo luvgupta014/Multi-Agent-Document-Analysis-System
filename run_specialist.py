@@ -7,8 +7,8 @@ from loguru import logger
 import os
 import sys
 
-from syfe_assignment.agents.specialist import SpecialistAgent
-from syfe_assignment.utils.logging_config import setup_logging
+from rag_system.agents.specialist import SpecialistAgent
+from rag_system.utils.logging_config import setup_logging
 
 load_dotenv()
 

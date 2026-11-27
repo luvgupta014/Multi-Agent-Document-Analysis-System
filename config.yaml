@@ -14,9 +14,12 @@ specialist:
   collection_name: climate_docs
   port: 8001
 
+manager_api:
+  port: 8002
+
 knowledge_base:
   doc_dir: docs/sample_documents
-  file_pattern: "*.txt"
+  file_pattern: "*"           # supports .txt and .pdf
   chunk_size: 500
   chunk_overlap: 50
   persist_dir: ./chroma_db
@@ -26,9 +29,15 @@ embedding:
 
 retrieval:
   top_k: 5
+  similarity_threshold: 0.3  # discard chunks below this cosine similarity score
+  rerank: false              # set true when cross-encoder re-ranking is added
+
+chunking:
+  strategy: sentence_aware   # options: sentence_aware (current), fixed, semantic (future)
 
 logging:
   level: INFO
   log_dir: logs
   rotation: 10 MB
   retention: 7 days
+  json_logs: false           # set true for structured JSON output (Datadog/Loki compatible)

@@ -2,35 +2,39 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+*.whl
+
+# Virtual environment
 venv/
 env/
-ENV/
+.venv/
 
-# Environment
+# Environment / secrets
 .env
-
-# Databases
-chroma_db/
-*.db
-
-# Logs
-logs/
-*.log
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
 .DS_Store
-Thumbs.db
 
-# Testing
+# Project artifacts
+chroma_db/
+logs/
+*.log
+
+# Testing / coverage
 .pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
 
-# Project specific
-*.pdf
+# Distribution
+*.tar.gz

@@ -46,9 +46,9 @@ services:
       init-kb:
         condition: service_completed_successfully
 
-  manager:
+  manager-repl:
     build: .
-    container_name: manager-agent
+    container_name: manager-repl
     volumes:
       - ./logs:/app/logs
     environment:
@@ -59,6 +59,22 @@ services:
       - specialist
     stdin_open: true
     tty: true
+    profiles: [repl]
+
+  manager-api:
+    build: .
+    container_name: manager-api
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MCP_SERVER_URL=http://mcp-server:8000
+    command: python run_api.py
+    depends_on:
+      - specialist
+    profiles: [api]
 
 volumes:
   chroma_data:

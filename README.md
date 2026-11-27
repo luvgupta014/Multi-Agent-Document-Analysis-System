@@ -1,16 +1,14 @@
 # Multi-Agent Document Analysis System
 
-A multi-agent RAG (Retrieval-Augmented Generation) system built with MCP (Model Context Protocol) for the Syfe AI Engineering Intern assignment. The idea is that a Manager Agent orchestrates queries across specialist agents to answer questions that span multiple documents.
+A production-ready multi-agent RAG (Retrieval-Augmented Generation) system using MCP (Model Context Protocol) for orchestrated document retrieval and question answering.
 
-I chose MCP as the communication layer because it gives a clean separation between the orchestrator and the retrieval logic — you can swap out specialists without rewriting the manager.
+[![Tests](https://github.com/YOUR_USERNAME/multi-agent-rag/actions/workflows/tests.yml/badge.svg)](https://github.com/YOUR_USERNAME/multi-agent-rag/actions)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+A Manager Agent orchestrates queries across specialist agents to synthesize answers that span multiple documents, with full source citation and latency tracking.
 
 ## How it works
-
-The system has three moving parts:
-
-1. **MCP Server** — a FastAPI service that acts as the message router and agent registry. Agents register themselves on startup, and the Manager discovers them at query time.
-2. **Specialist Agent** — handles the actual document retrieval. It wraps a ChromaDB vector store and exposes a `document_retriever` tool.
-3. **Manager Agent** — the user-facing component. It takes a question, asks Gemini whether it even needs to search documents, and if so, routes the query through MCP to the Specialist. Then it synthesizes a final answer with source citations.
 
 ```
 User Question
@@ -26,15 +24,22 @@ MCP Server ──► routes to Specialist ──► ChromaDB search
 Manager gets results back, synthesizes answer with Gemini
 ```
 
+The system has three moving parts:
+
+1. **MCP Server** — a FastAPI service that acts as the message router and agent registry. Agents register themselves on startup, and the Manager discovers them at query time.
+2. **Specialist Agent** — handles the actual document retrieval. It wraps a ChromaDB vector store and exposes a `document_retriever` tool.
+3. **Manager Agent** — the user-facing component. It takes a question, asks Gemini whether it even needs to search documents, and if so, routes the query through MCP to the Specialist. Then it synthesizes a final answer with source citations.
+
 ## Tech Stack
 
 - Python 3.12
 - Google Gemini (gemini-2.5-flash, free tier)
 - FastAPI + uvicorn
-- ChromaDB for vector storage
+- ChromaDB for vector storage (cosine similarity)
 - sentence-transformers (all-MiniLM-L6-v2) for embeddings
 - httpx for async inter-service calls
-- loguru for logging
+- tenacity for retry/backoff on API calls
+- loguru for structured logging
 
 ## Getting Started
 
@@ -64,9 +69,9 @@ Open `.env` and **only change** the first line:
 GEMINI_API_KEY=your_actual_api_key_here
 ```
 
-**All other variables have working defaults** — ports (8000, 8001), paths, model name (`gemini-2.5-flash`), etc. No need to touch them unless you want to customize.
+**All other variables have working defaults** — ports (8000, 8001, 8002), paths, model name (`gemini-2.5-flash`), etc. No need to touch them unless you want to customize.
 
-**Note on LLM flexibility:** The system currently uses Google Gemini because it has a generous free tier and simple API. You can switch between Gemini models (`gemini-2.5-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`) by changing `GEMINI_MODEL` in `.env`. **To use OpenAI, Anthropic, or other providers**, you'd need to modify [manager.py](syfe_assignment/agents/manager.py#L29) to replace the `google.generativeai` client — the architecture supports this, but I kept it simple for the MVP to focus on the MCP/multi-agent design.
+**Note on LLM flexibility:** The system currently uses Google Gemini because it has a generous free tier and simple API. You can switch between Gemini models (`gemini-2.5-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`) by changing `GEMINI_MODEL` in `.env`. **To use OpenAI, Anthropic, or other providers**, you'd need to modify [manager.py](rag_system/agents/manager.py) to replace the `google.generativeai` client — the architecture supports this, but Gemini is kept as the default for its free tier.
 
 ### Index the knowledge base
 
@@ -74,48 +79,60 @@ GEMINI_API_KEY=your_actual_api_key_here
 python setup_knowledge_base.py
 ```
 
-This chunks and embeds the 5 sample documents into ChromaDB (~32 chunks total).
+This chunks and embeds the sample documents into ChromaDB. Supports both `.txt` and `.pdf` files.
 
 ### Run the system
 
 You need 3 terminals:
 
 ```bash
-# Terminal 1
+# Terminal 1 — MCP Server (message router)
 python run_mcp_server.py
 
-# Terminal 2 (wait a few seconds for MCP to start)
+# Terminal 2 — Specialist Agent (wait a few seconds for MCP to start)
 python run_specialist.py
 
-# Terminal 3
+# Terminal 3 — Option A: interactive REPL
 python run_manager.py
+
+# Terminal 3 — Option B: REST API (query via HTTP)
+python run_api.py
 ```
 
-Then just type questions in Terminal 3. Try something like:
-- "What is the churn model's AUC-ROC?"
-- "How does our data pipeline handle streaming?"
-- "What is 2+2?" (this one skips retrieval entirely)
+**REST API usage:**
+```bash
+curl -X POST http://localhost:8002/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the churn model AUC-ROC?"}'
+```
+
+Then just type questions in the manager terminal or use the API. Try:
+- `"What is the churn model's AUC-ROC?"`
+- `"How does our data pipeline handle streaming?"`
+- `"What is 2+2?"` (this one skips retrieval entirely)
 
 ## Project Layout
 
 ```
-syfe_assignment/
+rag_system/
+├── api/
+│   └── app.py           # FastAPI REST interface for the manager
 ├── mcp_server/
 │   ├── models.py        # Pydantic schemas for messages, tools, agents
 │   ├── registry.py      # In-memory agent registry
 │   └── server.py        # FastAPI server with MCP endpoints
 ├── knowledge_base/
-│   ├── loader.py        # Document loading + chunking
-│   └── vector_store.py  # ChromaDB wrapper
+│   ├── loader.py        # Document loading + chunking (txt + pdf)
+│   └── vector_store.py  # ChromaDB wrapper (cosine similarity)
 ├── agents/
 │   ├── specialist.py    # Document retrieval agent
-│   └── manager.py       # Orchestrator agent
+│   └── manager.py       # Orchestrator agent (with retry logic)
 └── utils/
     ├── logging_config.py
     └── metrics.py
 
-docs/sample_documents/     # 5 knowledge base files
-tests/test_system.py       # Unit tests
+docs/sample_documents/     # Knowledge base files (txt + pdf supported)
+tests/test_system.py       # 35+ unit tests with coverage
 config.yaml               # App config
 .env                      # Secrets + env vars
 Dockerfile + docker-compose.yml
@@ -130,17 +147,59 @@ The server exposes two MCP-compliant endpoints:
 
 Other endpoints handle agent registration (`POST /register`), discovery (`GET /agents`), and message routing (`POST /send`).
 
-## A2A Design Choices
+## REST API Reference
 
-**Why HTTP/JSON?** It's simple, debuggable, and the assignment says "a direct function call or HTTP request is sufficient." I went with HTTP so the agents can run as separate processes, which is closer to how you'd actually deploy this.
+The Manager REST API (port 8002) exposes:
 
-**State management:** Each query is stateless — the Manager sends the full context (question + retrieved chunks) to Gemini every time. I didn't implement conversation history since the assignment focuses on single-query analysis, but it would be straightforward to add.
+| Endpoint | Method | Description |
+|---|---|---|
+| `/query` | POST | Submit a question, get a synthesized answer |
+| `/health` | GET | Health check |
+| `/docs` | GET | Interactive Swagger UI |
 
-**Specialist personality:** The Specialist uses a system prompt that says "You are a meticulous technical analyst" and enforces citation-only answers. The Manager has a different role — it decides whether to use tools and handles orchestration.
+**Query request:**
+```json
+{
+  "question": "string",
+  "top_k": 5
+}
+```
+
+**Query response:**
+```json
+{
+  "question": "string",
+  "answer": "string",
+  "specialist_used": "string",
+  "total_time_ms": 1234.5,
+  "success": true,
+  "sources": [...]
+}
+```
+
+## Architecture Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Vector DB | ChromaDB | Native persistence; no separate server process needed for prototype |
+| Distance metric | Cosine | Standard for semantic similarity; better calibrated than L2 for text embeddings |
+| Embeddings | all-MiniLM-L6-v2 (384-dim) | Fast load time; quality sufficient for small-to-medium corpora |
+| LLM | Google Gemini 2.5 Flash | Generous free tier; simple Python SDK; model swappable via env var |
+| Agent comms | HTTP/JSON over MCP | Debuggable; allows agents to run as separate processes |
+| Query state | Stateless per-query | Keeps context window clean; conversation history is an additive feature |
+| Retry strategy | Exponential backoff (tenacity) | Handles 429 rate limits gracefully without crashing |
+
+## Known Limitations & Roadmap
+
+- **Chunking:** Sentence-aware splitting with fixed overlap. Semantic chunking would improve retrieval quality for longer documents.
+- **Re-ranking:** Raw similarity results go to Gemini; a cross-encoder re-ranker (e.g. `ms-marco-MiniLM-L-6-v2`) would improve answer precision.
+- **Multiple specialists:** Registry supports N specialists; routing logic (beyond keyword scoring) needs an embedding-based similarity approach for production.
+- **Conversation history:** Each query is stateless. A session-aware mode with a rolling context window is the next planned feature.
+- **Similarity threshold:** Currently configurable via `config.yaml`; threshold tuning on a labeled eval set would improve precision/recall trade-off.
 
 ## Knowledge Base
 
-Five sample documents covering different domains:
+Sample documents covering different domains:
 
 | Document | Topic |
 |----------|-------|
@@ -152,10 +211,10 @@ Five sample documents covering different domains:
 
 Cross-document queries (like "What's the churn model's AUC-ROC and how does the pipeline work?") pull from multiple files to test the retrieval properly.
 
-## Bonus Features
+## Features
 
 ### Source Citations
-Answers include references like `[Source: model_performance_report.txt, chunk 3]` so you can trace where the information came from. This is handled through the Specialist's system prompt and by passing chunk metadata through the pipeline.
+Answers include references like `[Source: model_performance_report.txt, chunk 3]` so you can trace where the information came from.
 
 ### Logging
 Key events are logged with latency tracking:
@@ -173,43 +232,26 @@ docker-compose up --build
 Spins up all three services. Health checks make sure the MCP server is ready before the Specialist tries to register.
 
 ### Configuration
-Everything is externalized — API keys, ports, model names, paths — split between `.env` (secrets) and `config.yaml` (app settings). No hardcoded values in the source code.
+Everything is externalized — API keys, ports, model names, paths, retrieval thresholds — split between `.env` (secrets) and `config.yaml` (app settings). No hardcoded values in the source code.
 
 ## Testing
 
 ```bash
-pytest tests/test_system.py -v
+pytest tests/ -v
+
+# With coverage report:
+pytest tests/ -v --cov=rag_system --cov-report=term-missing
 ```
 
-31 tests covering models, registry, document loading, MCP endpoints, and metrics.
-
-## Self-Evaluation
-
-**What went well:**
-- The MCP abstraction works cleanly — adding a new specialist agent would just mean registering another service
-- The LLM-based tool decision is a nice touch. For "What is 2+2?", it correctly skips retrieval entirely
-- Source citations make the answers verifiable
-- ChromaDB's persistent storage means you don't re-index every time
-
-**What I'd improve with more time:**
-- The chunking strategy is basic (sentence-aware splitting with overlap). I'd experiment with semantic chunking or recursive splitting
-- Currently there's only one specialist. The architecture supports multiple, but I didn't implement routing between different domain experts
-- No re-ranking step — the raw similarity results go straight to Gemini. Adding a cross-encoder re-ranker would improve answer quality
-- The tests cover unit-level stuff but don't have integration tests that spin up all three services
-- Error handling around the Gemini API could be more robust (retry with backoff instead of just catching exceptions)
-
-**Trade-offs I made:**
-- Chose ChromaDB over FAISS because it handles persistence natively, even though FAISS would be faster for pure in-memory search
-- Went with stateless queries rather than building conversation history — keeps it simple for the MVP scope
-- Used `all-MiniLM-L6-v2` (384-dim) over larger models because it loads fast and the knowledge base is small enough that embedding quality isn't the bottleneck
+35+ tests covering models, registry, document loading, MCP endpoints, manager logic, and metrics.
 
 ## Troubleshooting
 
 - **"GEMINI_API_KEY not found"** — Make sure you created `.env` from `.env.example` and added your actual API key
 - **"No specialist agents available"** — Make sure `run_specialist.py` is running and you see "Registered with MCP server" in its output
 - **"Knowledge base is empty"** — Run `setup_knowledge_base.py` first
-- **429 rate limit** — Gemini free tier has limits. Wait 30s or try switching to `gemini-1.5-flash` in `.env`
-- **Port conflict** — Kill existing Python processes (`taskkill /F /IM python.exe` on Windows) or change `MCP_SERVER_PORT`/`SPECIALIST_PORT` in `.env`
+- **429 rate limit** — The system retries automatically with exponential backoff. If it persists, switch to `gemini-1.5-flash` in `.env`
+- **Port conflict** — Kill existing Python processes or change `MCP_SERVER_PORT`/`SPECIALIST_PORT` in `.env`
 - **ModuleNotFoundError** — Make sure you activated the virtual environment (`venv\Scripts\activate` on Windows)
 
-**Quick connection test:** After starting all 3 terminals, visit http://localhost:8000/health in your browser — you should see `{"status":"healthy"}`
+**Quick connection test:** After starting all services, visit http://localhost:8000/health in your browser — you should see `{"status":"healthy"}`.

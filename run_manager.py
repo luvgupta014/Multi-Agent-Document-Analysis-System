@@ -4,7 +4,7 @@ import os
 import yaml
 from loguru import logger
 
-from syfe_assignment.agents.manager import ManagerAgent
+from rag_system.agents.manager import ManagerAgent
 
 
 def load_config():
