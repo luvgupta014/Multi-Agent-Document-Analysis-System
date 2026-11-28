@@ -1,0 +1,31 @@
+Climate Change: A Scientific Overview
+
+Climate change refers to long-term shifts in global temperatures and weather patterns.
+Since the mid-20th century, human activities have been the main driver of climate change,
+primarily due to the burning of fossil fuels like coal, oil, and natural gas.
+
+The greenhouse effect occurs when gases such as carbon dioxide (CO2), methane (CH4), and
+nitrous oxide (N2O) trap heat in the Earth's atmosphere. This leads to a rise in average
+global temperatures, a phenomenon known as global warming.
+
+Key observed impacts include:
+- Rising sea levels due to melting ice sheets and thermal expansion of ocean water
+- More frequent and intense extreme weather events (hurricanes, droughts, floods)
+- Disruption of ecosystems and loss of biodiversity
+- Ocean acidification caused by absorption of excess CO2
+
+The Intergovernmental Panel on Climate Change (IPCC) has established that limiting warming
+to 1.5°C above pre-industrial levels requires rapid, far-reaching, and unprecedented changes
+in all aspects of society. Net-zero emissions must be reached by approximately 2050.
+
+Carbon capture and storage (CCS) technologies aim to remove CO2 directly from the atmosphere
+or at the point of emission. Nature-based solutions such as reforestation and wetland
+restoration also play an important role in sequestering carbon.
+
+Adaptation strategies — building sea walls, developing drought-resistant crops, and
+redesigning urban infrastructure — are essential alongside mitigation efforts, as some
+degree of climate change is now unavoidable due to past emissions.
+
+International cooperation is coordinated through the United Nations Framework Convention on
+Climate Change (UNFCCC) and the Paris Agreement, which commits nations to setting nationally
+determined contributions (NDCs) to reduce emissions.

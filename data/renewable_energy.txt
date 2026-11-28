@@ -1,0 +1,36 @@
+Renewable Energy Technologies
+
+Renewable energy comes from naturally replenished sources such as sunlight, wind, rain,
+tides, waves, and geothermal heat. Unlike fossil fuels, renewables produce little to no
+greenhouse gas emissions during operation.
+
+Solar Energy
+Photovoltaic (PV) cells convert sunlight directly into electricity using the photoelectric
+effect. Solar panel costs have fallen by more than 90% since 2010, making solar the cheapest
+source of electricity in history in many regions. Concentrated solar power (CSP) uses mirrors
+to focus sunlight and generate steam that drives turbines.
+
+Wind Energy
+Wind turbines convert kinetic energy from wind into electricity. Onshore wind is one of the
+lowest-cost electricity sources available. Offshore wind farms benefit from stronger, more
+consistent winds and are expanding rapidly in Europe, Asia, and North America.
+
+Energy Storage
+Intermittency — the fact that sun and wind are not always available — is the central challenge
+for renewable energy. Lithium-ion batteries are the dominant storage technology today.
+Grid-scale battery storage, pumped hydro, and emerging technologies like hydrogen fuel cells
+and flow batteries help balance supply and demand.
+
+Hydropower
+Hydropower converts the energy of flowing water into electricity. It is the largest source of
+renewable electricity globally, accounting for about 16% of world electricity production.
+Large dams can have significant ecological impacts; run-of-river projects are a lower-impact
+alternative.
+
+Geothermal Energy
+Geothermal power plants tap heat from beneath the Earth's surface. Enhanced geothermal systems
+(EGS) are expanding the geographic range of this technology beyond volcanic regions.
+
+The transition to renewable energy requires not just new generation capacity but also upgrades
+to electricity grids, demand-side management, and policy frameworks that support investment
+and fair market access.

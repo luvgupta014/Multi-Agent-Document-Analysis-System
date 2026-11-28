@@ -1,8 +1,8 @@
 """
 Document loading and chunking.
 
-Supports .txt and .pdf files. Chunking uses sentence-aware splitting with
-configurable overlap so context is preserved across chunk boundaries.
+Supports .txt, .pdf, and .docx files. Chunking uses sentence-aware splitting
+with configurable overlap so context is preserved across chunk boundaries.
 """
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -215,6 +215,59 @@ class DocumentLoader:
         return documents
 
     @staticmethod
+    def load_docx_file(
+        filepath: str, chunk_size: int = 500, strategy: str = "sentence_aware"
+    ) -> List[Document]:
+        """
+        Load and chunk a Word (.docx) document.
+
+        Requires ``python-docx``. Each paragraph is joined with a newline
+        and then chunked using the same strategy as .txt and .pdf files.
+        """
+        try:
+            from docx import Document as DocxDocument
+        except ImportError:
+            logger.error("python-docx not installed. Run: pip install python-docx")
+            return []
+
+        path = Path(filepath)
+
+        if not path.exists():
+            logger.error(f"File not found: {filepath}")
+            return []
+
+        doc = DocxDocument(str(path))
+        full_text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+        if not full_text.strip():
+            logger.warning(f"No text extracted from {path.name}")
+            return []
+
+        if strategy == "recursive":
+            chunks = DocumentLoader.recursive_chunk_text(full_text, chunk_size=chunk_size)
+        else:
+            chunks = DocumentLoader.chunk_text(full_text, chunk_size=chunk_size)
+
+        documents = []
+        for i, chunk in enumerate(chunks):
+            if chunk.strip():
+                doc_obj = Document(
+                    content=chunk,
+                    metadata={
+                        "id": f"{path.stem}_chunk_{i}",
+                        "source": str(path),
+                        "chunk_index": i,
+                        "total_chunks": len(chunks),
+                        "filename": path.name,
+                        "file_type": "docx",
+                    },
+                )
+                documents.append(doc_obj)
+
+        logger.info(f"Loaded {len(documents)} chunks from DOCX: {path.name}")
+        return documents
+
+    @staticmethod
     def load_directory(
         dirpath: str,
         pattern: str = "*",
@@ -222,10 +275,10 @@ class DocumentLoader:
         strategy: str = "sentence_aware",
     ) -> List[Document]:
         """
-        Load all supported documents (.txt, .pdf) from a directory.
+        Load all supported documents (.txt, .pdf, .docx) from a directory.
 
         The ``pattern`` argument is accepted for backwards compatibility
-        but the method always scans for both supported extensions.
+        but the method always scans for all supported extensions.
         """
         path = Path(dirpath)
 
@@ -242,6 +295,8 @@ class DocumentLoader:
                 docs = DocumentLoader.load_text_file(str(filepath), chunk_size, strategy)
             elif filepath.suffix == ".pdf":
                 docs = DocumentLoader.load_pdf_file(str(filepath), chunk_size, strategy)
+            elif filepath.suffix == ".docx":
+                docs = DocumentLoader.load_docx_file(str(filepath), chunk_size, strategy)
             else:
                 continue
             all_docs.extend(docs)

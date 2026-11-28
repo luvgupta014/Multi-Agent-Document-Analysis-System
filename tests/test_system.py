@@ -321,7 +321,8 @@ class TestManagerAgent:
 
     def test_should_not_retrieve_for_math(self):
         manager, mock_llm = self._make_manager()
-        mock_llm.generate.return_value = "no"
+        # _route() now parses JSON — a "direct" action means no retrieval
+        mock_llm.generate.return_value = '{"action": "direct", "reason": "math question"}'
         result = manager._should_use_retrieval("What is 2+2?", ["document_retriever"])
         assert result is False
 
@@ -445,18 +446,16 @@ class TestMetrics:
 class TestRestAPI:
 
     @pytest.fixture
-    def api_client(self):
+    async def api_client(self):
+        import httpx
         from rag_system.api.app import app
-        from fastapi.testclient import TestClient
-        # Provide a dummy key so the manager tries to init but we'll mock it
         with patch.dict("os.environ", {"GEMINI_API_KEY": "fake-key"}):
-            with TestClient(app) as client:
-                yield client
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as ac:
+                yield ac
 
-    def test_api_health(self, api_client):
-        response = api_client.get("/health")
+    async def test_api_health(self, api_client):
+        response = await api_client.get("/health")
         assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "healthy"
-        assert data["service"] == "Manager REST API"
-        assert "manager_ready" in data

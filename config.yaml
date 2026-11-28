@@ -52,6 +52,10 @@ agents:
   web_search_enabled: true
   web_search_port: 8004
 
+api:
+  key: ""                   # set via API_KEY env var; leave blank to disable auth
+  rate_limit_per_minute: 60 # 0 to disable rate limiting
+
 logging:
   level: INFO
   log_dir: logs

@@ -30,7 +30,9 @@ class ConversationMemory:
         self._turns.append(Turn(role=role, content=content))
         # Keep only the last max_turns pairs (each pair = user + assistant)
         max_items = self.max_turns * 2
-        if len(self._turns) > max_items:
+        if max_items == 0:
+            self._turns.clear()
+        elif len(self._turns) > max_items:
             self._turns = self._turns[-max_items:]
 
     def format_for_prompt(self) -> str:
