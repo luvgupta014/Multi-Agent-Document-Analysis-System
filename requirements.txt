@@ -32,7 +32,11 @@ python-dotenv==1.0.0
 loguru==0.7.0
 pyyaml==6.0.1
 
-# Testing
+# Testing & linting
 pytest==8.3.0
 pytest-asyncio==0.24.0
 pytest-cov==5.0.0
+ruff==0.8.0
+
+# Optional observability (used when LANGFUSE_PUBLIC_KEY & LANGFUSE_SECRET_KEY are set)
+# langfuse==2.57.0

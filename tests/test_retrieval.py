@@ -8,7 +8,6 @@ Covers:
 """
 import sys
 import os
-import pytest
 from unittest.mock import MagicMock, patch
 
 # Make sure project root is on sys.path

@@ -9,7 +9,7 @@ carries its own Memory object.  Phase 6 can persist to SQLite if needed.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List
 
 

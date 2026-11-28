@@ -26,7 +26,6 @@ _FAKE_RESULT = {
 @pytest.fixture
 async def api_client():
     """AsyncClient against the app with no auth enabled."""
-    import httpx
     from rag_system.api.app import app
     with patch.dict("os.environ", {"GEMINI_API_KEY": "fake-key", "API_KEY": ""}):
         async with httpx.AsyncClient(
@@ -39,7 +38,6 @@ async def api_client():
 @pytest.fixture
 async def api_client_with_auth():
     """AsyncClient against the app with API_KEY=secret123."""
-    import httpx
     from rag_system.api import app as app_module
     from rag_system.api.app import app
 
@@ -193,7 +191,6 @@ class TestRateLimiting:
     async def test_rate_limit_triggers_at_threshold(self, api_client):
         """_check_rate_limit raises 429 when bucket is full."""
         from rag_system.api.app import _check_rate_limit, _rate_buckets, _RATE_LIMIT
-        import time
         from fastapi import HTTPException
 
         # Build a mock request with a fake IP

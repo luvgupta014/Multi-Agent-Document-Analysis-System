@@ -21,11 +21,10 @@ from __future__ import annotations
 import re
 import sqlite3
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from fastapi import FastAPI, HTTPException, status
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from rag_system.mcp_server.models import Tool, AgentRegistration, Message
 

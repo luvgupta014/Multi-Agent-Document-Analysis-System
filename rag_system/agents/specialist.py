@@ -1,7 +1,6 @@
 from fastapi import FastAPI, HTTPException, status
 from typing import List, Dict, Optional
 from loguru import logger
-import os
 
 from rag_system.knowledge_base.vector_store import VectorStore
 from rag_system.knowledge_base.base_store import BaseVectorStore, ChromaVectorStore

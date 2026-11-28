@@ -16,6 +16,7 @@ LLM calls are wrapped with retry inside each backend (Phase 3).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 import time
 import httpx
@@ -23,8 +24,23 @@ from loguru import logger
 
 from rag_system.mcp_server.models import Message
 from rag_system.utils.metrics import MetricsCollector, QueryMetric
-from rag_system.llm.base import BaseLLM, LLMError
+from rag_system.utils.security import filter_retrieved_chunks
+from rag_system.utils.tracing import Tracer, get_tracer
+from rag_system.llm.base import BaseLLM
 from rag_system.agents.memory import ConversationMemory
+
+
+def _load_manager_config() -> Dict[str, Any]:
+    """Read defaults from config.yaml; returns {} if unavailable."""
+    try:
+        import yaml
+        cfg_path = Path(__file__).parent.parent.parent / "config.yaml"
+        if cfg_path.exists():
+            with open(cfg_path, encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    except Exception:
+        pass
+    return {}
 
 
 SYNTHESIS_SYSTEM_PROMPT = """You are a meticulous technical analyst. Your job is to synthesize a clear, concise answer based only on the provided context and the user's question. You must:
@@ -57,11 +73,40 @@ class ManagerAgent:
         model_name: str = "gemini-2.5-flash",
         llm: Optional[BaseLLM] = None,
         memory_turns: int = 5,
+        similarity_threshold: Optional[float] = None,
+        prompt_injection_filter: Optional[bool] = None,
+        injection_filter_mode: Optional[str] = None,
+        tracer: Optional[Tracer] = None,
     ):
+        cfg = _load_manager_config()
+        retrieval_cfg = cfg.get("retrieval", {})
+        security_cfg = cfg.get("security", {})
+        tracing_cfg = cfg.get("tracing", {})
+
         self.agent_id = agent_id
         self.mcp_url = mcp_url
         self.metrics = MetricsCollector()
         self.memory = ConversationMemory(max_turns=memory_turns)
+        self.similarity_threshold: float = (
+            float(similarity_threshold)
+            if similarity_threshold is not None
+            else float(retrieval_cfg.get("similarity_threshold", 0.3))
+        )
+        self.prompt_injection_filter: bool = (
+            bool(prompt_injection_filter)
+            if prompt_injection_filter is not None
+            else bool(security_cfg.get("prompt_injection_filter", True))
+        )
+        self.injection_filter_mode: str = (
+            injection_filter_mode
+            if injection_filter_mode is not None
+            else str(security_cfg.get("filter_mode", "drop"))
+        )
+        self.tracer: Tracer = (
+            tracer
+            if tracer is not None
+            else get_tracer(enabled=bool(tracing_cfg.get("enabled", True)))
+        )
 
         if llm is not None:
             self._llm = llm
@@ -234,14 +279,32 @@ class ManagerAgent:
         if not results:
             return "I couldn't find relevant information to answer your question."
 
+        # Enforce retrieval score threshold when similarity scores are present
+        scored = [r["similarity"] for r in results if "similarity" in r]
+        if scored and self.similarity_threshold > 0 and max(scored) < self.similarity_threshold:
+            logger.info(
+                f"Max similarity {max(scored):.3f} below threshold {self.similarity_threshold}"
+            )
+            return "Not found in documents: no retrieved passage met the similarity threshold."
+
+        # Strip or drop chunks containing indirect prompt-injection attempts
+        results = filter_retrieved_chunks(
+            results,
+            enabled=self.prompt_injection_filter,
+            mode=self.injection_filter_mode,
+        )
+        if not results:
+            return "I couldn't find safe, relevant information to answer your question."
+
         context_parts = []
         for i, result in enumerate(results[:5], 1):
             source_file = result.get("metadata", {}).get("filename", "unknown")
             chunk_idx = result.get("metadata", {}).get("chunk_index", "?")
             similarity = result.get("similarity", 0.0)
+            text = result.get("content") or result.get("snippet") or ""
             context_parts.append(
                 f"Passage {i} [Source: {source_file}, chunk {chunk_idx}] "
-                f"(similarity: {similarity:.3f}):\n{result['content']}\n"
+                f"(similarity: {similarity:.3f}):\n{text}\n"
             )
 
         context = "\n".join(context_parts)
@@ -275,10 +338,12 @@ Provide a clear, concise answer with source citations."""
     async def answer_question(self, question: str) -> Dict[str, Any]:
         logger.info(f"Processing question: {question}")
         total_start = time.time()
+        trace = self.tracer.start_trace("answer_question", input={"question": question})
 
         def _err(msg: str, error: str) -> Dict:
             self.memory.add("user", question)
             self.memory.add("assistant", msg)
+            trace.update(output={"error": error}, metadata={"success": False})
             return {
                 "question": question,
                 "answer": msg,
@@ -291,8 +356,10 @@ Provide a clear, concise answer with source citations."""
 
         try:
             # 1. Routing decision
+            route_span = trace.span("route", input={"question": question})
             routing = self._route(question)
             action = routing["action"]
+            route_span.end(output=routing)
             logger.info(f"Manager decision: {action}")
 
             # 2. Direct answer (no specialist)
@@ -302,6 +369,7 @@ Provide a clear, concise answer with source citations."""
                     answer = self._call_llm(f"{history_prefix}Question: {question}")
                     self.memory.add("user", question)
                     self.memory.add("assistant", answer)
+                    trace.update(output={"answer": answer}, metadata={"action": action})
                     return {
                         "question": question,
                         "answer": answer,
@@ -345,8 +413,16 @@ Provide a clear, concise answer with source citations."""
                 return _err("Could not find appropriate specialist.", "No suitable specialist")
 
             # 5. Query the specialist
+            ret_span = trace.span(
+                "retrieve",
+                input={"question": question, "specialist": specialist["agent_id"], "tool": target_tool},
+            )
             search_results = await self.query_specialist(specialist, question, tool=target_tool)
             retrieval_ms = round((time.time() - total_start) * 1000, 1)
+            ret_span.end(
+                output={"results_count": len(search_results.get("results", []))},
+                metadata={"latency_ms": retrieval_ms},
+            )
 
             if "error" in search_results:
                 return _err(
@@ -356,9 +432,11 @@ Provide a clear, concise answer with source citations."""
 
             # 6. Synthesise
             synth_start = time.time()
+            synth_span = trace.span("synthesize", input={"question": question})
             history_prefix = self.memory.format_for_prompt()
             answer = self._synthesize_answer(question, search_results, history=history_prefix)
             synth_ms = round((time.time() - synth_start) * 1000, 1)
+            synth_span.end(output={"answer": answer}, metadata={"latency_ms": synth_ms})
 
             self.memory.add("user", question)
             self.memory.add("assistant", answer[:200])  # store summary to keep prompt short
@@ -377,6 +455,14 @@ Provide a clear, concise answer with source citations."""
                     success=True,
                 )
             )
+            trace.update(
+                output={"answer": answer},
+                metadata={
+                    "specialist_used": specialist["name"],
+                    "action": action,
+                    "total_time_ms": total_ms,
+                },
+            )
 
             return {
                 "question": question,
@@ -391,3 +477,5 @@ Provide a clear, concise answer with source citations."""
         except Exception as e:
             logger.error(f"Error processing question: {e}")
             return _err(f"An error occurred: {str(e)}", str(e))
+        finally:
+            self.tracer.flush()

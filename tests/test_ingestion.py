@@ -7,8 +7,6 @@ Covers:
 - /upload endpoint (txt, pdf, docx, unsupported type, empty file)
 """
 import io
-import textwrap
-import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 

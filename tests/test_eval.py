@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 # Make sure eval/ is importable
 EVAL_DIR = Path(__file__).parent.parent / "eval"

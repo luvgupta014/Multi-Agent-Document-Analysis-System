@@ -12,7 +12,7 @@ Covers:
 - REST API health endpoint
 """
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 
 from rag_system.mcp_server.models import Tool, AgentRegistration, Message, MessageResponse
 from rag_system.mcp_server.registry import AgentRegistry

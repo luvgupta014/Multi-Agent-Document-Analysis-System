@@ -12,13 +12,10 @@ Tests for Phase 4 additions:
 """
 from __future__ import annotations
 
-import json
 import sqlite3
-import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # ConversationMemory
@@ -269,7 +266,7 @@ class TestWebSearchSpecialistAgentTools:
 # ManagerAgent._route() with mocked LLM
 # ---------------------------------------------------------------------------
 from rag_system.agents.manager import ManagerAgent
-from rag_system.llm.base import BaseLLM, LLMConfig
+from rag_system.llm.base import BaseLLM
 
 
 def _mock_manager(route_response: str = '{"action": "document_retrieval", "reason": "test"}'):

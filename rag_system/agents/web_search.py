@@ -10,7 +10,7 @@ The Manager routes questions about current events / external knowledge here.
 from __future__ import annotations
 
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict
 
 import httpx
 from fastapi import FastAPI, HTTPException, status

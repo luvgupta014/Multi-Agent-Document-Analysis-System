@@ -6,7 +6,7 @@ All tests are mock-based — no API keys, no network, no ChromaDB needed.
 import sys
 import os
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -85,7 +85,8 @@ class TestCreateLLM:
         with patch.dict("sys.modules", {"openai": mock_openai_mod}), \
              patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
             from rag_system.llm import openai_llm
-            import importlib; importlib.reload(openai_llm)
+            import importlib
+            importlib.reload(openai_llm)
             from rag_system.llm.openai_llm import OpenAILLM
             llm = create_llm(cfg)
             assert isinstance(llm, OpenAILLM)
