@@ -14,7 +14,6 @@ Environment variables (optional):
 """
 import json
 import os
-import time
 from typing import Optional
 
 import requests

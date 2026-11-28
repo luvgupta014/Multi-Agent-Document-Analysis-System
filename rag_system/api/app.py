@@ -31,11 +31,15 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+import httpx
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from loguru import logger
 
 from rag_system.agents.manager import ManagerAgent
+from rag_system.llm.base import LLMError
+from rag_system.llm.factory import create_llm
+from rag_system.utils.config import load_config
 from rag_system.utils.logging_config import setup_logging
 
 load_dotenv()
@@ -44,19 +48,7 @@ load_dotenv()
 # Config helpers
 # ---------------------------------------------------------------------------
 
-def _load_yaml_config() -> dict:
-    try:
-        import yaml
-        cfg_path = Path(__file__).parent.parent.parent / "config.yaml"
-        if cfg_path.exists():
-            with open(cfg_path) as f:
-                return yaml.safe_load(f) or {}
-    except Exception:
-        pass
-    return {}
-
-
-_cfg = _load_yaml_config()
+_cfg = load_config()
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -152,25 +144,27 @@ async def lifespan(app: FastAPI):
         level=os.getenv("LOG_LEVEL", "INFO"),
     )
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or api_key == "your_gemini_api_key_here":
-        logger.error("GEMINI_API_KEY not set — manager will not initialize")
-        _manager = None
-    else:
+    try:
+        provider = _cfg.get("llm", {}).get("provider", "gemini").lower()
+        if provider == "gemini" and os.getenv("GEMINI_API_KEY", "").strip() == "your_gemini_api_key_here":
+            raise LLMError("GEMINI_API_KEY still has placeholder value.")
+
+        llm = create_llm(_cfg)
         mcp_host = os.getenv("MCP_SERVER_HOST", "localhost")
         if mcp_host == "0.0.0.0":
             mcp_host = "localhost"
         mcp_port = os.getenv("MCP_SERVER_PORT", "8000")
         mcp_url = os.getenv("MCP_SERVER_URL", f"http://{mcp_host}:{mcp_port}")
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
         _manager = ManagerAgent(
             agent_id="manager_api",
             mcp_url=mcp_url,
-            api_key=api_key,
-            model_name=model_name,
+            llm=llm,
         )
-        logger.info(f"Manager API ready → MCP at {mcp_url}")
+        logger.info(f"Manager API ready → MCP at {mcp_url} (llm={llm})")
+    except LLMError as exc:
+        logger.error(f"LLM not configured ({exc}) — manager will not initialize")
+        _manager = None
 
     yield
     logger.info("Manager API shutting down")
@@ -284,7 +278,7 @@ async def query(request: Request, body: QueryRequest) -> QueryResponse:
             detail="Manager agent not initialized. Check GEMINI_API_KEY.",
         )
 
-    result = await _manager.answer_question(body.question)
+    result = await _manager.answer_question(body.question, top_k=body.top_k)
 
     return QueryResponse(
         question=result["question"],
@@ -332,12 +326,15 @@ async def upload(request: Request, file: UploadFile = File(...)) -> UploadRespon
 
         from rag_system.knowledge_base.loader import DocumentLoader
 
+        chunk_size = int(_cfg.get("knowledge_base", {}).get("chunk_size", 500))
+        strategy = str(_cfg.get("chunking", {}).get("strategy", "recursive"))
+
         loaders = {
             ".txt": DocumentLoader.load_text_file,
             ".pdf": DocumentLoader.load_pdf_file,
             ".docx": DocumentLoader.load_docx_file,
         }
-        docs = loaders[suffix](str(tmp_path), chunk_size=500, strategy="recursive")
+        docs = loaders[suffix](str(tmp_path), chunk_size=chunk_size, strategy=strategy)
 
         if not docs:
             raise HTTPException(
@@ -345,11 +342,38 @@ async def upload(request: Request, file: UploadFile = File(...)) -> UploadRespon
                 detail="No text could be extracted from the uploaded file.",
             )
 
-        specialist = _manager.specialist
         for doc in docs:
             doc.metadata["filename"] = file.filename or "uploaded"
             doc.metadata["source"] = file.filename or "uploaded"
-        specialist.vector_store.add_documents(docs)
+
+        # Support direct specialist injection (used in unit tests) as well as live MCP discovery
+        if hasattr(_manager, "specialist") and getattr(_manager, "specialist", None) is not None:
+            _manager.specialist.vector_store.add_documents(docs)
+        else:
+            ingested_via_mcp = False
+            payload = {
+                "documents": [
+                    {"content": d.content, "metadata": d.metadata}
+                    for d in docs
+                ]
+            }
+            try:
+                specialists = await _manager.discover_specialists()
+                doc_specialists = [
+                    s for s in specialists
+                    if any(t.get("name") == "document_retriever" for t in s.get("tools", []))
+                ]
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    for spec in doc_specialists:
+                        resp = await client.post(f"{spec['endpoint'].rstrip('/')}/ingest", json=payload)
+                        resp.raise_for_status()
+                        ingested_via_mcp = True
+            except Exception as exc:
+                logger.warning(f"MCP specialist ingest unavailable ({exc}), writing locally")
+
+            if not ingested_via_mcp:
+                from rag_system.knowledge_base.base_store import create_vector_store
+                create_vector_store(_cfg).add_documents(docs)
 
         logger.info(f"Uploaded '{file.filename}': {len(docs)} chunks indexed")
         return UploadResponse(

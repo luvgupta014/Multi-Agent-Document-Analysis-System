@@ -16,31 +16,19 @@ LLM calls are wrapped with retry inside each backend (Phase 3).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import List, Dict, Any, Optional
 import time
 import httpx
 from loguru import logger
 
 from rag_system.mcp_server.models import Message
+from rag_system.utils.config import load_config
 from rag_system.utils.metrics import MetricsCollector, QueryMetric
 from rag_system.utils.security import filter_retrieved_chunks
 from rag_system.utils.tracing import Tracer, get_tracer
 from rag_system.llm.base import BaseLLM
+from rag_system.llm.factory import create_llm
 from rag_system.agents.memory import ConversationMemory
-
-
-def _load_manager_config() -> Dict[str, Any]:
-    """Read defaults from config.yaml; returns {} if unavailable."""
-    try:
-        import yaml
-        cfg_path = Path(__file__).parent.parent.parent / "config.yaml"
-        if cfg_path.exists():
-            with open(cfg_path, encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-    except Exception:
-        pass
-    return {}
 
 
 SYNTHESIS_SYSTEM_PROMPT = """You are a meticulous technical analyst. Your job is to synthesize a clear, concise answer based only on the provided context and the user's question. You must:
@@ -72,21 +60,29 @@ class ManagerAgent:
         api_key: Optional[str] = None,
         model_name: str = "gemini-2.5-flash",
         llm: Optional[BaseLLM] = None,
-        memory_turns: int = 5,
+        memory_turns: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
         prompt_injection_filter: Optional[bool] = None,
         injection_filter_mode: Optional[str] = None,
         tracer: Optional[Tracer] = None,
     ):
-        cfg = _load_manager_config()
+        cfg = load_config()
         retrieval_cfg = cfg.get("retrieval", {})
         security_cfg = cfg.get("security", {})
         tracing_cfg = cfg.get("tracing", {})
+        agents_cfg = cfg.get("agents", {})
+
+        turns = (
+            int(memory_turns)
+            if memory_turns is not None
+            else int(agents_cfg.get("memory_turns", 5))
+        )
 
         self.agent_id = agent_id
         self.mcp_url = mcp_url
         self.metrics = MetricsCollector()
-        self.memory = ConversationMemory(max_turns=memory_turns)
+        self.memory = ConversationMemory(max_turns=turns)
+        self.default_top_k: int = int(retrieval_cfg.get("top_k", 5))
         self.similarity_threshold: float = (
             float(similarity_threshold)
             if similarity_threshold is not None
@@ -110,7 +106,7 @@ class ManagerAgent:
 
         if llm is not None:
             self._llm = llm
-        else:
+        elif api_key is not None:
             if not api_key:
                 raise ValueError("GEMINI_API_KEY is required!")
             from rag_system.llm.gemini import GeminiLLM
@@ -120,6 +116,8 @@ class ManagerAgent:
                 model_name=model_name,
                 api_key=api_key,
             ))
+        else:
+            self._llm = create_llm(cfg)
 
         logger.info(f"Manager agent '{agent_id}' initialised with {self._llm}")
 
@@ -331,11 +329,26 @@ Provide a clear, concise answer with source citations."""
             logger.error(f"LLM API error: {e}")
             return f"Error generating answer: {str(e)}"
 
+    def _generate_sql(self, question: str, schema: str = "") -> str:
+        """Translate a natural-language question into a single SQLite SELECT statement."""
+        prompt = (
+            "Convert the question below into a single read-only SQLite SELECT query.\n"
+            "Reply with ONLY the raw SQL query — no markdown fences, no explanation.\n\n"
+            f"{schema}\n\n"
+            f"Question: {question}\n"
+            "SQL:"
+        )
+        raw = self._call_llm(prompt).strip()
+        raw = raw.strip("`").strip()
+        if raw.lower().startswith("sql"):
+            raw = raw[3:].strip()
+        return raw.split(";")[0].strip()
+
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
 
-    async def answer_question(self, question: str) -> Dict[str, Any]:
+    async def answer_question(self, question: str, top_k: Optional[int] = None) -> Dict[str, Any]:
         logger.info(f"Processing question: {question}")
         total_start = time.time()
         trace = self.tracer.start_trace("answer_question", input={"question": question})
@@ -413,11 +426,26 @@ Provide a clear, concise answer with source citations."""
                 return _err("Could not find appropriate specialist.", "No suitable specialist")
 
             # 5. Query the specialist
+            specialist_query = question
+            if target_tool == "sql_query":
+                sql_tool = next(
+                    (t for t in specialist.get("tools", []) if t.get("name") == "sql_query"),
+                    {},
+                )
+                schema_hint = sql_tool.get("description", "")
+                specialist_query = self._generate_sql(question, schema=schema_hint)
+                logger.info(f"Generated SQL: {specialist_query}")
+
             ret_span = trace.span(
                 "retrieve",
                 input={"question": question, "specialist": specialist["agent_id"], "tool": target_tool},
             )
-            search_results = await self.query_specialist(specialist, question, tool=target_tool)
+            search_results = await self.query_specialist(
+                specialist,
+                specialist_query,
+                top_k=top_k or self.default_top_k,
+                tool=target_tool,
+            )
             retrieval_ms = round((time.time() - total_start) * 1000, 1)
             ret_span.end(
                 output={"results_count": len(search_results.get("results", []))},

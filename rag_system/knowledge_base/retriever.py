@@ -67,6 +67,7 @@ class HybridRetriever:
         self._bm25 = None
         self._bm25_corpus: List[str] = []
         self._bm25_ids: List[str] = []
+        self._bm25_metadatas: List[Dict] = []
 
         if hybrid:
             self._build_bm25_index()
@@ -90,21 +91,37 @@ class HybridRetriever:
             self.hybrid = False
             return
 
+        collection = getattr(self.vector_store, "collection", None)
+        if collection is None:
+            logger.warning("Vector store has no collection attribute — BM25 disabled.")
+            self._bm25 = None
+            return
+
         # Fetch all documents from ChromaDB
-        result = self.vector_store.collection.get(include=["documents", "metadatas"])
+        result = collection.get(include=["documents", "metadatas"])
         ids = result.get("ids", [])
         texts = result.get("documents", [])
+        metadatas = result.get("metadatas") or [{} for _ in ids]
 
         if not ids:
             logger.warning("BM25 index is empty: no documents in vector store yet.")
-            self.hybrid = False
+            self._bm25 = None
+            self._bm25_ids = []
+            self._bm25_corpus = []
+            self._bm25_metadatas = []
             return
 
         self._bm25_ids = ids
         self._bm25_corpus = texts
+        self._bm25_metadatas = metadatas
         tokenised = [t.lower().split() for t in texts]
         self._bm25 = BM25Okapi(tokenised)
         logger.info(f"BM25 index built with {len(ids)} documents")
+
+    def refresh_index(self) -> None:
+        """Rebuild the BM25 index after new documents are added to the vector store."""
+        if self.hybrid:
+            self._build_bm25_index()
 
     def _load_cross_encoder(self) -> None:
         """Load the cross-encoder model for re-ranking."""
@@ -157,10 +174,11 @@ class HybridRetriever:
             for doc_id in bm25_ranked:
                 if doc_id not in id_to_result:
                     idx = self._bm25_ids.index(doc_id)
+                    meta = self._bm25_metadatas[idx] if idx < len(self._bm25_metadatas) else {}
                     id_to_result[doc_id] = {
                         "id": doc_id,
                         "content": self._bm25_corpus[idx],
-                        "metadata": {},
+                        "metadata": meta or {},
                         "similarity": 0.0,
                         "distance": 1.0,
                     }

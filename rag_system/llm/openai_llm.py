@@ -8,6 +8,13 @@ the factory raises a clear error if the package is missing.
 from __future__ import annotations
 
 from loguru import logger
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from .base import BaseLLM, LLMConfig, LLMError
 
 
@@ -30,14 +37,23 @@ class OpenAILLM(BaseLLM):
         self._client = OpenAI(**kwargs)
         logger.info(f"OpenAILLM initialised: {config.model_name}")
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+        retry=retry_if_exception_type((TimeoutError, ConnectionError)),
+        reraise=True,
+    )
+    def _call_completions(self, prompt: str):
+        return self._client.chat.completions.create(
+            model=self.config.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+        )
+
     def generate(self, prompt: str) -> str:
         try:
-            response = self._client.chat.completions.create(
-                model=self.config.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-            )
+            response = self._call_completions(prompt)
             return response.choices[0].message.content or ""
         except Exception as exc:
             raise LLMError(f"OpenAI generate failed: {exc}") from exc

@@ -105,6 +105,10 @@ python run_mcp_server.py
 # Terminal 2: Document specialist (:8001)
 python run_specialist.py
 
+# Optional additional specialists:
+# python run_sql_specialist.py   # SQL specialist (:8003)
+# python run_web_search.py       # Web search specialist (:8004)
+
 # Terminal 3: Manager REST API (:8002) or interactive CLI
 python run_api.py
 # python run_manager.py
@@ -132,7 +136,7 @@ curl -N "http://localhost:8002/chat?q=How+does+the+ELT+pipeline+work"
 
 # Upload a new document (.txt, .pdf, .docx)
 curl -X POST http://localhost:8002/upload \
-  -F "file=@data/renewable_energy.txt"
+  -F "file=@data/rag_lewis_2020.pdf"
 ```
 
 Include `-H "X-API-Key: <your-key>"` when `API_KEY` is set in `.env`.
@@ -190,9 +194,10 @@ rag_system/
 
 ui/app.py                   # Streamlit chat interface
 eval/                       # Golden QA dataset (30 Qs) & eval runner
-data/                       # Sample text corpus & auto-created SQLite demo DB
+data/                       # Public arXiv PDFs, text corpus, and SQLite demo DB
 docs/                       # Sample knowledge-base files & deployment guide
 tests/                      # Unit and integration tests
+run_*.py                    # Entry points (MCP, specialists, API, CLI)
 ```
 
 ## Design Decisions

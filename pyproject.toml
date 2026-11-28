@@ -40,3 +40,4 @@ skip_covered = false
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["E402"]
+"eval/*.py" = ["E402"]

@@ -1,10 +1,10 @@
 # Evaluation Results
 
-Generated: 2026-11-27 19:09:28  
+Generated: 2026-11-28 16:40:56  
 Questions: 30  
-Run time: 0.5s
+Run time: 1.3s
 
-## Retrieval Metrics (baseline — vector search only)
+## Retrieval Metrics (Hybrid BM25 + Dense (RRF))
 
 | Recall@1 | Recall@3 | Recall@5 | Recall@10 | MRR |
 |---|---|
@@ -55,4 +55,4 @@ Run time: 0.5s
 - Chunk IDs use format `<filename_stem>_chunk_<index>`
 - Similarity metric: cosine (1 − distance)
 - Embedding model: all-MiniLM-L6-v2 (384-dim)
-- Phase 2 will add BM25 hybrid + cross-encoder re-ranking
+- Retrieval mode: Hybrid BM25 + Dense (RRF)

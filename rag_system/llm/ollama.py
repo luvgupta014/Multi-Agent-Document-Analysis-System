@@ -9,6 +9,13 @@ from __future__ import annotations
 
 import httpx
 from loguru import logger
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from .base import BaseLLM, LLMConfig, LLMError
 
 
@@ -22,6 +29,17 @@ class OllamaLLM(BaseLLM):
         self._base_url = (config.base_url or self._DEFAULT_URL).rstrip("/")
         logger.info(f"OllamaLLM initialised: {config.model_name} @ {self._base_url}")
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError)),
+        reraise=True,
+    )
+    def _post_generate(self, url: str, payload: dict) -> dict:
+        response = httpx.post(url, json=payload, timeout=120.0)
+        response.raise_for_status()
+        return response.json()
+
     def generate(self, prompt: str) -> str:
         url = f"{self._base_url}/api/generate"
         payload = {
@@ -34,9 +52,7 @@ class OllamaLLM(BaseLLM):
             },
         }
         try:
-            response = httpx.post(url, json=payload, timeout=120.0)
-            response.raise_for_status()
-            data = response.json()
+            data = self._post_generate(url, payload)
             return data.get("response", "")
         except httpx.HTTPStatusError as exc:
             raise LLMError(f"Ollama HTTP error {exc.response.status_code}: {exc}") from exc

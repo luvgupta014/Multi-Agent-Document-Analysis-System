@@ -59,7 +59,7 @@ class VectorStore:
                 convert_to_numpy=True,
             ).tolist()
 
-            self.collection.add(
+            self.collection.upsert(
                 embeddings=embeddings,
                 documents=texts,
                 metadatas=metadatas,

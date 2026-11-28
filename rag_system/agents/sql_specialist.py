@@ -156,7 +156,7 @@ class SQLSpecialistAgent:
                 name="sql_query",
                 description=(
                     "Run a safe SELECT query against the SQLite database. "
-                    "Returns columns and rows as JSON."
+                    f"Returns columns and rows as JSON.\n{self.schema}"
                 ),
                 parameters={
                     "type": "object",

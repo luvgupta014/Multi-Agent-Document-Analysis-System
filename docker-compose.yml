@@ -46,6 +46,37 @@ services:
       init-kb:
         condition: service_completed_successfully
 
+  sql-specialist:
+    build: .
+    container_name: specialist-sql
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8000
+      - SQL_SPECIALIST_HOST=sql-specialist
+    command: python run_sql_specialist.py
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+
+  web-search:
+    build: .
+    container_name: specialist-web-search
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8000
+      - WEB_SEARCH_HOST=web-search
+    command: python run_web_search.py
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+
   manager-repl:
     build: .
     container_name: manager-repl
@@ -68,6 +99,7 @@ services:
       - "8002:8002"
     volumes:
       - ./logs:/app/logs
+      - chroma_data:/app/chroma_db
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - MCP_SERVER_URL=http://mcp-server:8000

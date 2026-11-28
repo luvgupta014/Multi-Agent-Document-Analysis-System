@@ -16,7 +16,6 @@ import argparse
 import os
 import sys
 import time
-import json
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -33,7 +32,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from rag_system.knowledge_base.vector_store import VectorStore
-from rag_system.knowledge_base.loader import DocumentLoader
 from rag_system.knowledge_base.retriever import HybridRetriever
 
 
@@ -194,10 +192,21 @@ def run_ragas_eval(questions: List[Dict], vector_store: VectorStore) -> Dict:
 # Report generation
 # ---------------------------------------------------------------------------
 
-def write_results_md(retrieval: Dict, ragas: Dict, run_time: float, out_path: Path):
+def write_results_md(
+    retrieval: Dict,
+    ragas: Dict,
+    run_time: float,
+    out_path: Path,
+    hybrid: bool = False,
+    rerank: bool = False,
+):
     k_values = sorted(retrieval["recall_at_k"].keys())
     recall_header = " | ".join(f"Recall@{k}" for k in k_values)
     recall_row = " | ".join(str(retrieval["recall_at_k"][k]) for k in k_values)
+
+    mode_label = "Hybrid BM25 + Dense (RRF)" if hybrid else "Dense vector search only"
+    if rerank:
+        mode_label += " + Cross-Encoder"
 
     ragas_section = ""
     if ragas.get("skipped"):
@@ -217,7 +226,7 @@ Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}
 Questions: {retrieval['n_questions']}  
 Run time: {run_time:.1f}s
 
-## Retrieval Metrics (baseline — vector search only)
+## Retrieval Metrics ({mode_label})
 
 | {recall_header} | MRR |
 |---|---|
@@ -243,7 +252,7 @@ Run time: {run_time:.1f}s
     md += "- Chunk IDs use format `<filename_stem>_chunk_<index>`\n"
     md += "- Similarity metric: cosine (1 − distance)\n"
     md += "- Embedding model: all-MiniLM-L6-v2 (384-dim)\n"
-    md += "- Phase 2 will add BM25 hybrid + cross-encoder re-ranking\n"
+    md += f"- Retrieval mode: {mode_label}\n"
 
     out_path.write_text(md, encoding="utf-8")
     logger.info(f"Results written to {out_path}")
@@ -318,7 +327,7 @@ def main():
     print(f"\nTotal time: {run_time:.1f}s")
 
     out_path = Path(__file__).parent / "results.md"
-    write_results_md(retrieval, ragas, run_time, out_path)
+    write_results_md(retrieval, ragas, run_time, out_path, hybrid=hybrid, rerank=rerank)
     print(f"\nFull report: {out_path}")
 
 
