@@ -1,283 +1,222 @@
 # Multi-Agent Document Analysis System
 
-A production-ready multi-agent RAG (Retrieval-Augmented Generation) system using MCP (Model Context Protocol) for orchestrated document retrieval and question answering.
+A multi-agent RAG system built on FastAPI, ChromaDB, and a lightweight Model Context Protocol (MCP) message bus. A Manager Agent classifies incoming queries via structured JSON routing, dispatches work to Document, SQL, or Web Search specialists, checks retrieval relevance and prompt-injection guardrails, and streams grounded answers with source citations.
 
-[![Tests](https://github.com/YOUR_USERNAME/multi-agent-rag/actions/workflows/tests.yml/badge.svg)](https://github.com/YOUR_USERNAME/multi-agent-rag/actions)
+[![CI](https://github.com/YOUR_USERNAME/Multi-Agent-Document-Analysis-System/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/Multi-Agent-Document-Analysis-System/actions)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Manager Agent orchestrates queries across specialist agents to synthesize answers that span multiple documents, with full source citation and latency tracking.
+## Architecture
 
-## How it works
+```mermaid
+flowchart TB
+    Client["User / Client"] --> UI["Streamlit UI - ui/app.py"]
+    Client --> API["Manager REST API (:8002) - /query, /chat SSE, /upload"]
+    UI --> API
 
-```
-User Question
-     │
-     ▼
-Manager Agent ──► decides if retrieval is needed (via Gemini)
-     │                          │
-     │ (if yes)                 │ (if no, answer directly)
-     ▼                          ▼
-MCP Server ──► routes to Specialist ──► ChromaDB search
-     │
-     ▼
-Manager gets results back, synthesizes answer with Gemini
-```
+    API --> SecurityGate["X-API-Key Auth & Per-IP Rate Limiter"]
+    SecurityGate --> Manager["ManagerAgent - JSON Router & ConversationMemory"]
 
-The system has three moving parts:
+    Manager -->|"action: direct"| LLM["Swappable BaseLLM - Gemini, OpenAI, Ollama"]
+    Manager -->|"document_retrieval / sql_query / web_search"| MCP["MCP Server (:8000) - Agent Registry & /send"]
 
-1. **MCP Server** — a FastAPI service that acts as the message router and agent registry. Agents register themselves on startup, and the Manager discovers them at query time.
-2. **Specialist Agent** — handles the actual document retrieval. It wraps a ChromaDB vector store and exposes a `document_retriever` tool.
-3. **Manager Agent** — the user-facing component. It takes a question, asks Gemini whether it even needs to search documents, and if so, routes the query through MCP to the Specialist. Then it synthesizes a final answer with source citations.
+    MCP --> DocSpec["Document Specialist (:8001) - HybridRetriever"]
+    MCP --> SQLSpec["SQL Specialist (:8003) - Read-only SELECT SQLite"]
+    MCP --> WebSpec["Web Search Specialist (:8004) - DuckDuckGo API"]
 
-## Tech Stack
+    DocSpec --> Chroma["ChromaDB (Cosine) + BM25 RRF + Cross-Encoder"]
+    SQLSpec --> DB["SQLite - data/sample.db"]
 
-- Python 3.12
-- Google Gemini (gemini-2.5-flash, free tier)
-- FastAPI + uvicorn
-- ChromaDB for vector storage (cosine similarity)
-- sentence-transformers (all-MiniLM-L6-v2) for embeddings
-- httpx for async inter-service calls
-- tenacity for retry/backoff on API calls
-- loguru for structured logging
-
-## Getting Started
-
-### Prerequisites
-- Python 3.12+
-- A Gemini API key — get one free at https://aistudio.google.com/app/apikey (takes ~30 seconds)
-
-### Setup
-
-**1. Install dependencies:**
-```bash
-python -m venv venv
-venv\Scripts\activate        # Windows
-source venv/bin/activate     # Mac/Linux
-
-pip install -r requirements.txt
+    DocSpec -.->|"retrieved chunks"| Guard["Similarity Threshold (0.3) & Injection Filter"]
+    Guard --> LLM
+    Manager -.->|"optional spans"| Tracing["Langfuse Tracer"]
 ```
 
-**2. Configure environment:**
-```bash
-cp .env.example .env   # Mac/Linux
-copy .env.example .env  # Windows
-```
+## Capabilities
 
-Open `.env` and **only change** the first line:
-```
-GEMINI_API_KEY=your_actual_api_key_here
-```
-
-**All other variables have working defaults** — ports (8000, 8001, 8002), paths, model name (`gemini-2.5-flash`), etc. No need to touch them unless you want to customize.
-
-**Note on LLM flexibility:** The system currently uses Google Gemini because it has a generous free tier and simple API. You can switch between Gemini models (`gemini-2.5-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`) by changing `GEMINI_MODEL` in `.env`. **To use OpenAI, Anthropic, or other providers**, you'd need to modify [manager.py](rag_system/agents/manager.py) to replace the `google.generativeai` client — the architecture supports this, but Gemini is kept as the default for its free tier.
-
-### Index the knowledge base
-
-```bash
-python setup_knowledge_base.py
-```
-
-This chunks and embeds the sample documents into ChromaDB. Supports both `.txt` and `.pdf` files.
-
-### Run the system
-
-You need 3 terminals:
-
-```bash
-# Terminal 1 — MCP Server (message router)
-python run_mcp_server.py
-
-# Terminal 2 — Specialist Agent (wait a few seconds for MCP to start)
-python run_specialist.py
-
-# Terminal 3 — Option A: interactive REPL
-python run_manager.py
-
-# Terminal 3 — Option B: REST API (query via HTTP)
-python run_api.py
-```
-
-**REST API usage:**
-```bash
-curl -X POST http://localhost:8002/query \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What is the churn model AUC-ROC?"}'
-```
-
-Then just type questions in the manager terminal or use the API. Try:
-- `"What is the churn model's AUC-ROC?"`
-- `"How does our data pipeline handle streaming?"`
-- `"What is 2+2?"` (this one skips retrieval entirely)
-
-## Project Layout
-
-```
-rag_system/
-├── api/
-│   └── app.py           # FastAPI REST interface for the manager
-├── mcp_server/
-│   ├── models.py        # Pydantic schemas for messages, tools, agents
-│   ├── registry.py      # In-memory agent registry
-│   └── server.py        # FastAPI server with MCP endpoints
-├── knowledge_base/
-│   ├── loader.py        # Document loading + chunking (txt + pdf)
-│   └── vector_store.py  # ChromaDB wrapper (cosine similarity)
-├── agents/
-│   ├── specialist.py    # Document retrieval agent
-│   └── manager.py       # Orchestrator agent (with retry logic)
-└── utils/
-    ├── logging_config.py
-    └── metrics.py
-
-docs/sample_documents/     # Knowledge base files (txt + pdf supported)
-tests/test_system.py       # 35+ unit tests with coverage
-config.yaml               # App config
-.env                      # Secrets + env vars
-Dockerfile + docker-compose.yml
-```
-
-## MCP Specification
-
-The server exposes two MCP-compliant endpoints:
-
-- `GET /mcp/v1/tools` — returns all registered tools across agents
-- `POST /mcp/v1/tools/{tool_name}/invoke` — invokes a tool by name
-
-Other endpoints handle agent registration (`POST /register`), discovery (`GET /agents`), and message routing (`POST /send`).
-
-## REST API Reference
-
-The Manager REST API (port 8002) exposes:
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/query` | POST | Submit a question, get a synthesized answer |
-| `/health` | GET | Health check |
-| `/docs` | GET | Interactive Swagger UI |
-
-**Query request:**
-```json
-{
-  "question": "string",
-  "top_k": 5
-}
-```
-
-**Query response:**
-```json
-{
-  "question": "string",
-  "answer": "string",
-  "specialist_used": "string",
-  "total_time_ms": 1234.5,
-  "success": true,
-  "sources": [...]
-}
-```
-
-## Architecture Decisions
-
-| Decision | Choice | Rationale |
-|---|---|---|
-| Vector DB | ChromaDB | Native persistence; no separate server process needed for prototype |
-| Distance metric | Cosine | Standard for semantic similarity; better calibrated than L2 for text embeddings |
-| Embeddings | all-MiniLM-L6-v2 (384-dim) | Fast load time; quality sufficient for small-to-medium corpora |
-| LLM | Google Gemini 2.5 Flash | Generous free tier; simple Python SDK; model swappable via env var |
-| Agent comms | HTTP/JSON over MCP | Debuggable; allows agents to run as separate processes |
-| Query state | Stateless per-query | Keeps context window clean; conversation history is an additive feature |
-| Retry strategy | Exponential backoff (tenacity) | Handles 429 rate limits gracefully without crashing |
+- **Structured Multi-Agent Routing:** `ManagerAgent` emits JSON routing decisions across four paths: `document_retrieval`, `sql_query`, `web_search`, and `direct`, with rolling multi-turn `ConversationMemory`.
+- **Hybrid Retrieval + Re-ranking:** Combines dense cosine vector search (`all-MiniLM-L6-v2` in ChromaDB) and `BM25Okapi` via Reciprocal Rank Fusion (`rrf_k: 60`), plus an optional `ms-marco-MiniLM-L-6-v2` cross-encoder re-ranker.
+- **Swappable LLM Backends:** Unified `BaseLLM` interface with Google Gemini, OpenAI, and local Ollama implementations configured via `config.yaml`, wrapped in `tenacity` retries.
+- **Specialists over MCP:** Document retriever (`SpecialistAgent`), read-only `SELECT` SQLite runner (`SQLSpecialistAgent`), and DuckDuckGo search (`WebSearchSpecialistAgent`) register dynamically with the MCP server.
+- **Multi-Format Ingestion:** Recursive and sentence-aware chunking for `.txt`, `.pdf` (`pypdf`), and `.docx` (`python-docx`) files, plus live indexing via `POST /upload`.
+- **Streaming & UI:** `GET /chat` Server-Sent Events endpoint paired with a Streamlit chat frontend (`ui/app.py`) showing streaming tokens, expandable source citations, agent routing, and document upload.
+- **Production Guardrails:** Minimum cosine similarity threshold (`Not found in documents` on low-relevance hits), regex-based prompt-injection filtering on retrieved chunks, optional `X-API-Key` auth, per-IP sliding-window rate limiting, and optional Langfuse tracing.
 
 ## Retrieval Evaluation
 
-Measured on 30 hand-written questions across all 5 documents (`eval/golden_qa.yaml`).
+Measured on 30 questions across the 5-document baseline corpus ([eval/golden_qa.yaml](eval/golden_qa.yaml)):
 
-| Metric | Dense only (baseline) | Hybrid BM25+Dense + RRF |
-|--------|----------------------:|------------------------:|
+| Metric | Dense Only (Baseline) | Hybrid BM25 + Dense (RRF) |
+|---|---:|---:|
 | Recall@1 | 0.233 | **0.367** |
 | Recall@3 | 0.500 | **0.600** |
 | Recall@5 | 0.767 | 0.733 |
 | Recall@10 | 0.867 | **0.933** |
 | MRR | 0.439 | **0.536** |
 
-Hybrid retrieval (BM25 + dense vector search fused with Reciprocal Rank Fusion) improves precision at Recall@1 by **57%** and MRR by **22%**, making it significantly better at finding the right chunk on the first try. Toggle settings in `config.yaml`:
+Run the offline evaluation harness:
 
-```yaml
-retrieval:
-  hybrid: true    # BM25 + dense search with RRF
-  rerank: false   # cross-encoder re-ranking (slower, more accurate)
-chunking:
-  strategy: recursive   # or: sentence_aware
-```
-
-Run the evaluation yourself:
 ```bash
 python eval/run_eval.py --no-ragas
 ```
 
-## Known Limitations & Roadmap
+Settings are controlled in [config.yaml](config.yaml):
 
-- **Re-ranking:** Cross-encoder re-ranker (`ms-marco-MiniLM-L-6-v2`) is wired in and toggleable via `retrieval.rerank: true` in `config.yaml` — enable it to trade latency for precision.
-- **Multiple specialists:** Registry supports N specialists; routing logic (beyond keyword scoring) needs an embedding-based similarity approach for production.
-- **Conversation history:** Each query is stateless. A session-aware mode with a rolling context window is the next planned feature.
-- **Similarity threshold:** Currently configurable via `config.yaml`; threshold tuning on a labeled eval set would improve precision/recall trade-off.
+```yaml
+retrieval:
+  top_k: 5
+  similarity_threshold: 0.3
+  hybrid: true
+  rerank: false
+  rrf_k: 60
+chunking:
+  strategy: recursive
+```
 
-## Knowledge Base
+## Quickstart
 
-Sample documents covering different domains:
+### 1. Install and Configure
 
-| Document | Topic |
-|----------|-------|
-| climate_info.txt | Climate change overview |
-| renewable_energy.txt | Solar, wind, hydro, geothermal |
-| model_performance_report.txt | Q3 ML model metrics (churn, classification, recommendations) |
-| data_pipeline_architecture.txt | Kafka, Airflow, Iceberg, ELT pipeline |
-| future_feature_roadmap.txt | Q4 improvements planned for RAG + multi-agent |
+```bash
+python -m venv venv
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # Mac/Linux
 
-Cross-document queries (like "What's the churn model's AUC-ROC and how does the pipeline work?") pull from multiple files to test the retrieval properly.
+pip install -r requirements.txt
+cp .env.example .env
+```
 
-## Features
+Set `GEMINI_API_KEY` in `.env` (or switch `llm.provider` to `openai` or `ollama` in `config.yaml`).
 
-### Source Citations
-Answers include references like `[Source: model_performance_report.txt, chunk 3]` so you can trace where the information came from.
+### 2. Index Sample Documents
 
-### Logging
-Key events are logged with latency tracking:
-- Whether the Manager decided to use retrieval or answer directly
-- How long the MCP round-trip took
-- How long Gemini took to synthesize
-- Total end-to-end time
+```bash
+python setup_knowledge_base.py
+```
 
-Logs go to `logs/` with automatic rotation at 10MB.
+### 3. Start Services
 
-### Docker Support
+Run in separate terminals:
+
+```bash
+# Terminal 1: MCP message router (:8000)
+python run_mcp_server.py
+
+# Terminal 2: Document specialist (:8001)
+python run_specialist.py
+
+# Terminal 3: Manager REST API (:8002) or interactive CLI
+python run_api.py
+# python run_manager.py
+
+# Terminal 4 (optional): Streamlit chat UI (:8501)
+streamlit run ui/app.py
+```
+
+Or launch with Docker Compose:
+
 ```bash
 docker-compose up --build
 ```
-Spins up all three services. Health checks make sure the MCP server is ready before the Specialist tries to register.
 
-### Configuration
-Everything is externalized — API keys, ports, model names, paths, retrieval thresholds — split between `.env` (secrets) and `config.yaml` (app settings). No hardcoded values in the source code.
-
-## Testing
+### Example Requests
 
 ```bash
-pytest tests/ -v
+# Standard JSON query
+curl -X POST http://localhost:8002/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the churn model AUC-ROC?"}'
 
-# With coverage report:
-pytest tests/ -v --cov=rag_system --cov-report=term-missing
+# SSE streaming chat
+curl -N "http://localhost:8002/chat?q=How+does+the+ELT+pipeline+work"
+
+# Upload a new document (.txt, .pdf, .docx)
+curl -X POST http://localhost:8002/upload \
+  -F "file=@data/renewable_energy.txt"
 ```
 
-82 tests covering models, registry, document loading, MCP endpoints, manager logic, retrieval metrics, hybrid search, and chunking strategies.
+Include `-H "X-API-Key: <your-key>"` when `API_KEY` is set in `.env`.
 
-## Troubleshooting
+## API & MCP Reference
 
-- **"GEMINI_API_KEY not found"** — Make sure you created `.env` from `.env.example` and added your actual API key
-- **"No specialist agents available"** — Make sure `run_specialist.py` is running and you see "Registered with MCP server" in its output
-- **"Knowledge base is empty"** — Run `setup_knowledge_base.py` first
-- **429 rate limit** — The system retries automatically with exponential backoff. If it persists, switch to `gemini-1.5-flash` in `.env`
-- **Port conflict** — Kill existing Python processes or change `MCP_SERVER_PORT`/`SPECIALIST_PORT` in `.env`
-- **ModuleNotFoundError** — Make sure you activated the virtual environment (`venv\Scripts\activate` on Windows)
+### Manager REST API (`:8002`)
 
-**Quick connection test:** After starting all services, visit http://localhost:8000/health in your browser — you should see `{"status":"healthy"}`.
+| Endpoint | Method | Description |
+|---|---|---|
+| `/query` | `POST` | Synchronous question routing and answer synthesis |
+| `/chat` | `GET` | Token-streamed answer via Server-Sent Events (`?q=...`) |
+| `/upload` | `POST` | Multipart upload (`.txt`, `.pdf`, `.docx`) into ChromaDB |
+| `/health` | `GET` | Service status and manager readiness |
+| `/docs` | `GET` | OpenAPI / Swagger UI |
+
+### MCP Server (`:8000`)
+
+- `GET /mcp/v1/tools` — list registered specialist tools
+- `POST /mcp/v1/tools/{tool_name}/invoke` — invoke a tool by name
+- `POST /register`, `GET /agents`, `POST /send` — agent registration, discovery, and message dispatch
+
+## Project Layout
+
+```text
+rag_system/
+├── agents/
+│   ├── manager.py          # JSON routing, memory, guardrails, synthesis
+│   ├── memory.py           # Rolling ConversationMemory window
+│   ├── specialist.py       # Document retrieval specialist
+│   ├── sql_specialist.py   # Read-only SQLite query specialist
+│   └── web_search.py       # DuckDuckGo specialist with tenacity retries
+├── api/
+│   └── app.py              # FastAPI REST + SSE server, auth, rate limit, /upload
+├── knowledge_base/
+│   ├── base_store.py       # BaseVectorStore interface + ChromaVectorStore
+│   ├── loader.py           # .txt, .pdf, .docx loading + recursive chunking
+│   ├── retriever.py        # HybridRetriever (BM25 + Dense + RRF + CrossEncoder)
+│   └── vector_store.py     # ChromaDB cosine wrapper
+├── llm/
+│   ├── base.py             # BaseLLM & LLMConfig abstractions
+│   ├── factory.py          # Config-driven provider factory
+│   ├── gemini.py           # Google Gemini backend
+│   ├── ollama.py           # Local Ollama backend
+│   └── openai_llm.py       # OpenAI-compatible backend
+├── mcp_server/
+│   ├── models.py           # Message, Tool, AgentRegistration schemas
+│   ├── registry.py         # Agent registry
+│   └── server.py           # MCP HTTP endpoints
+└── utils/
+    ├── logging_config.py   # Loguru rotation & JSON log option
+    ├── metrics.py          # Query timing and success metrics
+    ├── security.py         # Prompt-injection detection & chunk filtering
+    └── tracing.py          # Optional Langfuse tracing with no-op fallback
+
+ui/app.py                   # Streamlit chat interface
+eval/                       # Golden QA dataset (30 Qs) & eval runner
+data/                       # Sample text corpus & auto-created SQLite demo DB
+docs/                       # Sample knowledge-base files & deployment guide
+tests/                      # Unit and integration tests
+```
+
+## Design Decisions
+
+| Component | Choice | Rationale |
+|---|---|---|
+| Vector Store | ChromaDB behind `BaseVectorStore` | Local persistence with zero external infra; swappable via base class |
+| Hybrid Search | BM25 + Cosine Dense + RRF (`k=60`) | Captures exact terms (model names, metrics) alongside semantics; +57% Recall@1 over dense alone |
+| Chunking | Recursive (`500` chars, `50` overlap) | Preserves paragraph/sentence boundaries better than fixed slices |
+| LLM Layer | `BaseLLM` + `tenacity` backoff | Provider-agnostic switching between Gemini, OpenAI, and Ollama; resilient to transient 429s |
+| Agent Bus | HTTP/JSON MCP server | Keeps specialists decoupled and independently deployable |
+| SQL Safety | Keyword blocklist + `SELECT` check | Enforced in Python (`_is_safe`) rather than trusting LLM prompt compliance |
+| Guardrails | Score gate + regex injection filter | Rejects off-topic context (`< 0.3` similarity) and drops/redacts override payloads before synthesis |
+| Observability | Optional Langfuse `Tracer` | Instruments route/retrieve/synthesize spans when keys are set; degrades to no-op locally |
+
+## Deployment
+
+See [docs/deployment.md](docs/deployment.md) and [render.yaml](render.yaml) for Render Blueprint and Docker deployment instructions.
+
+## Testing & CI
+
+CI runs on push and pull requests via [.github/workflows/ci.yml](.github/workflows/ci.yml) (`ruff check`, `pytest` with coverage, and `docker build`):
+
+```bash
+ruff check rag_system tests
+pytest tests/ -v --cov=rag_system --cov-report=term-missing
+```

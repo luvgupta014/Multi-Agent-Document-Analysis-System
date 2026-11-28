@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 if __name__ == "__main__":
-    port = int(os.getenv("MANAGER_API_PORT", "8002"))
+    port = int(os.getenv("PORT", os.getenv("MANAGER_API_PORT", "8002")))
     uvicorn.run(
         "rag_system.api.app:app",
         host="0.0.0.0",

@@ -1,0 +1,69 @@
+services:
+  - type: web
+    name: rag-mcp-server
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_mcp_server.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+
+  - type: web
+    name: rag-specialist
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && FORCE_RELOAD=true python setup_knowledge_base.py
+    startCommand: python run_specialist.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: MCP_SERVER_URL
+        fromService:
+          type: web
+          name: rag-mcp-server
+          property: url
+      - key: SPECIALIST_HOST
+        fromService:
+          type: web
+          name: rag-specialist
+          property: host
+
+  - type: web
+    name: rag-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_api.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: MCP_SERVER_URL
+        fromService:
+          type: web
+          name: rag-mcp-server
+          property: url
+
+  - type: web
+    name: rag-ui
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run ui/app.py --server.port $PORT --server.address 0.0.0.0
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: API_BASE_URL
+        fromService:
+          type: web
+          name: rag-api
+          property: url
+      - key: API_KEY
+        sync: false

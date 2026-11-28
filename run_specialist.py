@@ -17,7 +17,7 @@ SPECIALIST_CONFIG = {
     "name": "Climate Document Specialist",
     "description": "Expert in climate change, environmental science, renewable energy, data pipelines, and ML model performance",
     "collection_name": os.getenv("SPECIALIST_COLLECTION", "climate_docs"),
-    "port": int(os.getenv("SPECIALIST_PORT", "8001")),
+    "port": int(os.getenv("PORT", os.getenv("SPECIALIST_PORT", "8001"))),
     "persist_dir": os.getenv("KB_PERSIST_DIR", "./chroma_db")
 }
 
