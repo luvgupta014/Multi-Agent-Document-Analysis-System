@@ -45,6 +45,13 @@ retrieval:
 chunking:
   strategy: recursive        # options: sentence_aware, recursive
 
+agents:
+  memory_turns: 5           # number of recent conversation turns to keep in context
+  sql_db_path: data/sample.db
+  sql_port: 8003
+  web_search_enabled: true
+  web_search_port: 8004
+
 logging:
   level: INFO
   log_dir: logs

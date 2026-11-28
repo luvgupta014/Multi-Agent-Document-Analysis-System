@@ -1,13 +1,21 @@
 """
 Manager Agent — the user-facing orchestrator.
 
-Decides whether a question requires document retrieval, routes it to the
-appropriate specialist via MCP, and synthesizes a final answer using the
-configured LLM (Gemini, OpenAI, or Ollama — set via config.yaml).
+Decides which specialist to route each question to using structured JSON
+output from the LLM, then synthesizes a final answer.
 
-LLM calls are wrapped with exponential-backoff retry (tenacity) inside
-each backend implementation.
+Routing actions:
+  document_retrieval — use the ChromaDB specialist
+  sql_query          — use the SQL specialist
+  web_search         — use the web search specialist
+  direct             — answer without retrieval
+
+Conversation memory keeps the last N turns in context (config: agents.memory_turns).
+LLM calls are wrapped with retry inside each backend (Phase 3).
 """
+from __future__ import annotations
+
+import json
 from typing import List, Dict, Any, Optional
 import time
 import httpx
@@ -16,12 +24,27 @@ from loguru import logger
 from rag_system.mcp_server.models import Message
 from rag_system.utils.metrics import MetricsCollector, QueryMetric
 from rag_system.llm.base import BaseLLM, LLMError
+from rag_system.agents.memory import ConversationMemory
 
 
 SYNTHESIS_SYSTEM_PROMPT = """You are a meticulous technical analyst. Your job is to synthesize a clear, concise answer based only on the provided context and the user's question. You must:
 1. Only use information from the provided context passages.
 2. If the context does not contain enough information, explicitly state that.
 3. At the end of your answer, include a "Sources" section listing the document name and chunk index for each passage you referenced, in the format: [Source: filename, chunk N]."""
+
+ROUTING_PROMPT_TEMPLATE = """\
+You are a routing assistant. Given the conversation history and the user's question,
+decide which action to take. Reply with ONLY a JSON object — no markdown, no extra text.
+
+Available actions:
+  "document_retrieval" — search the internal knowledge base (documents, reports, pipelines, roadmaps)
+  "sql_query"          — query the SQL database (structured/tabular data, model metrics, experiments)
+  "web_search"         — search the web (current events, external information, general knowledge)
+  "direct"             — answer directly without any tool (greetings, math, trivial questions)
+
+{history}Question: {question}
+
+Reply format: {{"action": "<one of the four actions above>", "reason": "<one sentence>"}}"""
 
 
 class ManagerAgent:
@@ -33,16 +56,16 @@ class ManagerAgent:
         api_key: Optional[str] = None,
         model_name: str = "gemini-2.5-flash",
         llm: Optional[BaseLLM] = None,
+        memory_turns: int = 5,
     ):
         self.agent_id = agent_id
         self.mcp_url = mcp_url
         self.metrics = MetricsCollector()
+        self.memory = ConversationMemory(max_turns=memory_turns)
 
         if llm is not None:
-            # Injected directly (e.g. from factory or tests)
             self._llm = llm
         else:
-            # Legacy path: build Gemini from explicit api_key + model_name
             if not api_key:
                 raise ValueError("GEMINI_API_KEY is required!")
             from rag_system.llm.gemini import GeminiLLM
@@ -56,41 +79,53 @@ class ManagerAgent:
         logger.info(f"Manager agent '{agent_id}' initialised with {self._llm}")
 
     # ------------------------------------------------------------------
-    # LLM call — delegates to whatever backend is configured
+    # LLM call
     # ------------------------------------------------------------------
 
     def _call_llm(self, prompt: str) -> str:
-        """Call the configured LLM. Raises LLMError on failure."""
         return self._llm.generate(prompt)
 
     # ------------------------------------------------------------------
-    # Decision: does this question need retrieval?
+    # Structured JSON routing
+    # ------------------------------------------------------------------
+
+    def _route(self, question: str) -> Dict[str, str]:
+        """
+        Ask the LLM which action to take. Returns a dict with keys
+        'action' and 'reason'. Falls back to 'document_retrieval' on error.
+        """
+        history_text = self.memory.format_for_prompt()
+        prompt = ROUTING_PROMPT_TEMPLATE.format(
+            history=history_text,
+            question=question,
+        )
+        try:
+            raw = self._call_llm(prompt).strip()
+            # Strip markdown code fences if present
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+            decision = json.loads(raw)
+            action = decision.get("action", "document_retrieval")
+            valid = {"document_retrieval", "sql_query", "web_search", "direct"}
+            if action not in valid:
+                action = "document_retrieval"
+            logger.info(f"Routing decision: action={action}, reason={decision.get('reason','')}")
+            return {"action": action, "reason": decision.get("reason", "")}
+        except Exception as exc:
+            logger.warning(f"Routing failed ({exc}), defaulting to document_retrieval")
+            return {"action": "document_retrieval", "reason": "routing fallback"}
+
+    # ------------------------------------------------------------------
+    # Legacy compatibility — kept for existing tests
     # ------------------------------------------------------------------
 
     def _should_use_retrieval(self, question: str, available_tools: List[str]) -> bool:
-        """Ask Gemini whether to use the document_retriever tool."""
+        """Return True if the question needs document retrieval."""
         if "document_retriever" not in available_tools:
             return False
-
-        prompt = f"""You are an AI assistant deciding whether to use a document retrieval tool.
-The user asked: "{question}"
-
-Available tools: {available_tools}
-
-Should the document_retriever tool be used to answer this question?
-Reply with ONLY "yes" or "no"."""
-
-        try:
-            decision = self._call_llm(prompt).strip().lower()
-            use_tool = "yes" in decision
-            logger.info(
-                f"LLM tool decision for '{question[:50]}...': "
-                f"{'USE TOOL' if use_tool else 'SKIP TOOL'}"
-            )
-            return use_tool
-        except Exception as e:
-            logger.warning(f"Tool decision failed ({e}), defaulting to use retrieval")
-            return True
+        decision = self._route(question)
+        return decision["action"] == "document_retrieval"
 
     # ------------------------------------------------------------------
     # MCP agent discovery and selection
@@ -149,17 +184,20 @@ Reply with ONLY "yes" or "no"."""
         return specialists[0]
 
     # ------------------------------------------------------------------
-    # MCP round-trip
+    # MCP round-trip (generic — works for any tool)
     # ------------------------------------------------------------------
 
     async def query_specialist(
-        self, specialist: Dict, query: str, top_k: int = 5
+        self, specialist: Dict, query: str, top_k: int = 5, tool: str = "document_retriever"
     ) -> Dict:
+        params: Dict[str, Any] = {"query": query}
+        if tool == "document_retriever":
+            params["top_k"] = top_k
         message = Message(
             sender=self.agent_id,
             recipient=specialist["agent_id"],
-            tool="document_retriever",
-            parameters={"query": query, "top_k": top_k},
+            tool=tool,
+            parameters=params,
         )
 
         t_start = time.time()
@@ -181,11 +219,17 @@ Reply with ONLY "yes" or "no"."""
         return result["result"]
 
     # ------------------------------------------------------------------
-    # Answer synthesis
+    # Answer synthesis — document retrieval path
     # ------------------------------------------------------------------
 
-    def _synthesize_answer(self, question: str, search_results: Dict) -> str:
+    def _synthesize_answer(self, question: str, search_results: Dict, history: str = "") -> str:
         results = search_results.get("results", [])
+
+        # SQL result path — format table rows as context
+        if search_results.get("columns") and not results:
+            rows = search_results.get("rows", [])
+            if rows:
+                results = [{"content": str(rows), "metadata": {}, "similarity": 1.0}]
 
         if not results:
             return "I couldn't find relevant information to answer your question."
@@ -204,7 +248,7 @@ Reply with ONLY "yes" or "no"."""
 
         prompt = f"""{SYNTHESIS_SYSTEM_PROMPT}
 
-Context:
+{history}Context:
 {context}
 
 Question: {question}
@@ -232,74 +276,92 @@ Provide a clear, concise answer with source citations."""
         logger.info(f"Processing question: {question}")
         total_start = time.time()
 
+        def _err(msg: str, error: str) -> Dict:
+            self.memory.add("user", question)
+            self.memory.add("assistant", msg)
+            return {
+                "question": question,
+                "answer": msg,
+                "error": error,
+                "specialist_used": "None",
+                "sources": [],
+                "success": False,
+                "total_time_ms": round((time.time() - total_start) * 1000, 1),
+            }
+
         try:
-            specialists = await self.discover_specialists()
+            # 1. Routing decision
+            routing = self._route(question)
+            action = routing["action"]
+            logger.info(f"Manager decision: {action}")
 
-            if not specialists:
-                return {
-                    "question": question,
-                    "answer": "No specialist agents are available.",
-                    "error": "No specialists available",
-                    "specialist_used": "None",
-                    "sources": [],
-                    "success": False,
-                    "total_time_ms": round((time.time() - total_start) * 1000, 1),
-                }
-
-            all_tools = [
-                t["name"] for s in specialists for t in s.get("tools", [])
-            ]
-
-            should_retrieve = self._should_use_retrieval(question, all_tools)
-            logger.info(
-                f"Manager decision: "
-                f"{'retrieve documents' if should_retrieve else 'answer directly'}"
-            )
-
-            if not should_retrieve:
+            # 2. Direct answer (no specialist)
+            if action == "direct":
                 try:
-                    answer = self._call_llm(question)
+                    history_prefix = self.memory.format_for_prompt()
+                    answer = self._call_llm(f"{history_prefix}Question: {question}")
+                    self.memory.add("user", question)
+                    self.memory.add("assistant", answer)
                     return {
                         "question": question,
                         "answer": answer,
                         "specialist_used": "None (direct LLM answer)",
+                        "routing_action": action,
                         "sources": [],
                         "success": True,
                         "total_time_ms": round((time.time() - total_start) * 1000, 1),
                     }
                 except Exception as e:
                     logger.warning(f"Direct answer failed: {e}, falling back to retrieval")
+                    action = "document_retrieval"
 
-            specialist = self._select_specialist(question, specialists)
+            # 3. Discover specialists
+            specialists = await self.discover_specialists()
+            if not specialists:
+                return _err("No specialist agents are available.", "No specialists available")
+
+            # 4. Select the right specialist for the action
+            tool_map = {
+                "document_retrieval": "document_retriever",
+                "sql_query": "sql_query",
+                "web_search": "web_search",
+            }
+            target_tool = tool_map.get(action, "document_retriever")
+
+            # Find a specialist that has the required tool
+            specialist = None
+            for s in specialists:
+                if any(t["name"] == target_tool for t in s.get("tools", [])):
+                    specialist = s
+                    break
+
+            # Fall back to document_retriever if no match
+            if specialist is None:
+                action = "document_retrieval"
+                target_tool = "document_retriever"
+                specialist = self._select_specialist(question, specialists)
 
             if not specialist:
-                return {
-                    "question": question,
-                    "answer": "Could not find appropriate specialist.",
-                    "error": "No suitable specialist",
-                    "specialist_used": "None",
-                    "sources": [],
-                    "success": False,
-                    "total_time_ms": round((time.time() - total_start) * 1000, 1),
-                }
+                return _err("Could not find appropriate specialist.", "No suitable specialist")
 
-            search_results = await self.query_specialist(specialist, question)
+            # 5. Query the specialist
+            search_results = await self.query_specialist(specialist, question, tool=target_tool)
             retrieval_ms = round((time.time() - total_start) * 1000, 1)
 
             if "error" in search_results:
-                return {
-                    "question": question,
-                    "answer": f"Error querying specialist: {search_results['error']}",
-                    "error": search_results["error"],
-                    "specialist_used": specialist["name"],
-                    "sources": [],
-                    "success": False,
-                    "total_time_ms": round((time.time() - total_start) * 1000, 1),
-                }
+                return _err(
+                    f"Error querying specialist: {search_results['error']}",
+                    search_results["error"],
+                )
 
+            # 6. Synthesise
             synth_start = time.time()
-            answer = self._synthesize_answer(question, search_results)
+            history_prefix = self.memory.format_for_prompt()
+            answer = self._synthesize_answer(question, search_results, history=history_prefix)
             synth_ms = round((time.time() - synth_start) * 1000, 1)
+
+            self.memory.add("user", question)
+            self.memory.add("assistant", answer[:200])  # store summary to keep prompt short
 
             total_ms = round((time.time() - total_start) * 1000, 1)
             logger.info(f"Total question processing time: {total_ms}ms")
@@ -320,6 +382,7 @@ Provide a clear, concise answer with source citations."""
                 "question": question,
                 "answer": answer,
                 "specialist_used": specialist["name"],
+                "routing_action": action,
                 "sources": search_results.get("results", [])[:3],
                 "success": True,
                 "total_time_ms": total_ms,
@@ -327,12 +390,4 @@ Provide a clear, concise answer with source citations."""
 
         except Exception as e:
             logger.error(f"Error processing question: {e}")
-            return {
-                "question": question,
-                "answer": f"An error occurred: {str(e)}",
-                "error": str(e),
-                "specialist_used": "None",
-                "sources": [],
-                "success": False,
-                "total_time_ms": round((time.time() - total_start) * 1000, 1),
-            }
+            return _err(f"An error occurred: {str(e)}", str(e))
